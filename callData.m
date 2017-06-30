@@ -225,6 +225,7 @@ classdef callData
                             end
                         end
                     end
+                    cData.nCalls = call_k-1;
                    
                     
                 case 'lesions'
@@ -271,6 +272,7 @@ classdef callData
                             end
                         end
                     end
+                    cData.nCalls = call_k-1;
                     
                 case 'deafened'
                     
@@ -317,13 +319,15 @@ classdef callData
                             end
                         end
                     end
+                    cData.nCalls = call_k-1;
                     
                 case 'autoTrain'
+                    cData.loadWF = false;
                     cData.baseDirs = 'C:\Users\tobias\Desktop\analysis\bataudio\call groups\all\';
                     %cData.baseDirs = 'C:\Users\tobias\Desktop\analysis\bataudio\test\';
                     callFiles = dir([cData.baseDirs '*.mat']);
                     cData.nCalls = length(callFiles);
-                    [cData.callWF, cData.fName,cData.sessionID, cData.batName, cData.callType, cData.micType, cData.sessionType] = deal(cell(cData.nCalls,1)); % initialize call data cells
+                    [cData.fName,cData.sessionID, cData.batName, cData.callType, cData.micType, cData.sessionType] = deal(cell(cData.nCalls,1)); % initialize call data cells
                     [cData.recNum, cData.callNum, cData.xrun] = deal(zeros(cData.nCalls,1)); % initialize call data arrays
                     cData.expDay = datetime([],[],[]);
                     
@@ -332,7 +336,7 @@ classdef callData
                         cData.fName{call_k} = callFiles(call_k).name;
                         cData.batName{call_k} = s.batName;
                         cData.sessionType{call_k} = s.sessionType;
-                        cData.callWF{call_k} = s.rawData.';
+                        %cData.callWF{call_k} = s.rawData';
                         cData.callNum(call_k) = s.callNum;
                         cData.recNum(call_k) = s.recNum;
                         cData.sessionID{call_k} = s.sessionID;
@@ -349,15 +353,7 @@ classdef callData
                         cData.callType{call_k} = s.callType;
                         cData.micType{call_k} = s.micType;
                     end
-                    cData.expDay = cData.expDay';
-                    callProperties = properties(cData)';
-                    for prop = callProperties
-                        if all(size(cData.(prop{:})) == [cData.maxCalls,1])
-                            cData.(prop{:}) = cData.(prop{:})(1:cData.nCalls);
-                        elseif size(cData.(prop{:}),1) == cData.maxCalls && size(cData.(prop{:}),1) > 1
-                            cData.(prop{:}) = cData.(prop{:})(1:cData.nCalls,:);
-                        end
-                    end                    
+                    cData.expDay = cData.expDay';              
                     
                 case 'pratData'
                     cData.loadWF = false;
@@ -386,7 +382,7 @@ classdef callData
             % if we initialized different data structures to have a length
             % of 'maxCalls' go ahead and shorten those to remove empty
             % elements
-            cData.nCalls = call_k-1;
+            
             callProperties = properties(cData)';
             for prop = callProperties
                 if all(size(cData.(prop{:})) == [cData.maxCalls,1])
@@ -539,7 +535,8 @@ switch cData.expType
     case 'pratData'
         callWF = audioread([cData.baseDirs cData.fName{call_k}]);
     case 'autoTrain'
-        ...
+        callWF = load([cData.baseDirs cData.fName{call_k}]);
+        callWF = callWF.convData';
     otherwise
         display('No functionality to load callWF for the experiment type');
         keyboard;
