@@ -64,12 +64,12 @@ classdef callData
         pitchGoodnessWin
         cepstralF0Win
         
-        maxCalls = 40000
+        maxCalls = 80000
         minF0 = 100 % in Hz
         maxF0 = 20e3 % in Hz
         
-        windowLength = 20e-3 % in ms
-        overlap = 10e-3 % in ms
+        windowLength = 5e-3 % in ms
+        overlap = 4e-3 % in ms
         thresh = 0.1
         
         loadWF = true % Load in all call waveforms or not
@@ -105,8 +105,10 @@ classdef callData
                 if cData.loadWF % if we already loaded all the data into this object
                     callWF = cData.callWF{call_k};
                 else % if we need to load this data on the fly
+                    if ~isempty(cData.fName{call_k})
                     callWF = loadCallWF_onTheFly(cData,call_k);
-                    cData.callLength(call_k) = length(callWF);
+                    cData.callLength(call_k) = length(callWF)/fs;
+                    end
                 end
                 
                 % Assemble parameter structure for yin algorithm
@@ -324,13 +326,13 @@ classdef callData
                 case 'autoTrain'
                     cData.loadWF = false;
                     cData.baseDirs = 'C:\Users\tobias\Desktop\analysis\bataudio\call groups\all\';
+                    %cData.baseDirs = 'C:\Users\tobias\Desktop\analysis\bataudio\April2017\cut_preprocessed\';
                     %cData.baseDirs = 'C:\Users\tobias\Desktop\analysis\bataudio\test\';
                     callFiles = dir([cData.baseDirs '*.mat']);
                     cData.nCalls = length(callFiles);
-                    [cData.fName,cData.sessionID, cData.batName, cData.callType, cData.micType, cData.sessionType] = deal(cell(cData.nCalls,1)); % initialize call data cells
-                    [cData.recNum, cData.callNum, cData.xrun] = deal(zeros(cData.nCalls,1)); % initialize call data arrays
+                    [cData.fName, cData.batName, cData.callType, cData.micType, cData.sessionType] = deal(cell(cData.nCalls,1)); % initialize call data cells
+                    [cData.recNum, cData.callNum, cData.xrun, cData.sessionID,] = deal(zeros(cData.nCalls,1)); % initialize call data arrays
                     cData.expDay = datetime([],[],[]);
-                    
                     for call_k = 1:length(callFiles)
                         s = load([cData.baseDirs callFiles(call_k).name]);
                         cData.fName{call_k} = callFiles(call_k).name;
@@ -339,7 +341,14 @@ classdef callData
                         %cData.callWF{call_k} = s.rawData';
                         cData.callNum(call_k) = s.callNum;
                         cData.recNum(call_k) = s.recNum;
-                        cData.sessionID{call_k} = s.sessionID;
+                        sessID = s.sessionID;
+                        if ischar(sessID)
+                            sessID = str2double(sessID);
+                        end
+                        if size(sessID) == [1 2]
+                            sessID = 0;
+                        end
+                        cData.sessionID(call_k) = sessID;
                         if isfield(s,'xrun')
                             cData.xrun(call_k) = s.xrun;
                         else
@@ -405,9 +414,9 @@ classdef callData
                                     case 'cellInfo'
                                         callIdx = callIdx & strcmp(cData.cellInfo,S(1).subs{idx+1});
                                     case 'daysOld'
-                                        daysOldIdx = false(cData.nCalls,1);
-                                        for d = S(1).subs{idx+1}
-                                            daysOldIdx = daysOldIdx | cData.daysOld==d;
+                                        daysOldIdx = false(cData.nCalls,1); %make an index assuming all 0 initially
+                                        for d = S(1).subs{idx+1} %for the input that you're searching for
+                                            daysOldIdx = daysOldIdx | cData.daysOld==d; %make true if the day of indexed call is listed
                                         end
                                         callIdx = callIdx & daysOldIdx;
                                     case 'expDay'
@@ -423,16 +432,26 @@ classdef callData
                                     case 'batName'
                                         batNameIdx = false(cData.nCalls,1);
                                         for bN = S(1).subs{idx+1}
-                                            batNameIdx = batNameIdx | cellfun(@(x) ~isempty(strfind(x,bN)),cData.batName);
+                                            batNameIdx = batNameIdx | ~cellfun(@isempty, strfind(cData.batName,bN)); %cellfun(@(x) ~isempty(strfind(x,bN)),cData.batName);
                                         end
                                         callIdx = callIdx & batNameIdx;
                                         %callIdx = callIdx & cellfun(@(x) ~isempty(strfind(x,S(1).subs{idx+1})),cData.batName);                                       
                                     case 'callNum'
-                                        callIdx = callIdx & cellfun(@(x) ~isempty(strfind(x,S(1).subs{idx+1})),cData.callNum);
+                                        callNumIdx = false(cData.nCalls,1);
+                                        for rN = S(1).subs{idx+1}
+                                            callNumIdx = callNumIdx | cData.callNum==rN;
+                                        end
+                                        callIdx = callIdx & callNumIdx;
+                                        %callIdx = callIdx & cellfun(@(x) ~isempty(strfind(x,S(1).subs{idx+1})),cData.callNum);
                                     case 'callTrigger'
                                         callIdx = callIdx & (cData.callTrigger >= S(1).subs{idx+1}(1) & cData.callTrigger <= S(1).subs{idx+1}(2));
                                     case 'callType'
-                                        callIdx = callIdx & cellfun(@(x) ~isempty(strfind(x,S(1).subs{idx+1})),cData.callType);
+                                        callTypeIdx = false(cData.nCalls,1);
+                                        for cT = S(1).subs{idx+1}
+                                            callTypeIdx = callTypeIdx | cellfun(@(x) ~isempty(strfind(x,cT)),cData.callType);
+                                        end
+                                        callIdx = callIdx & callTypeIdx;
+                                        %callIdx = callIdx & cellfun(@(x) ~isempty(strfind(x,S(1).subs{idx+1})),cData.callType);
                                     case 'micType'
                                         callIdx = callIdx & cellfun(@(x) ~isempty(strfind(x,S(1).subs{idx+1})),cData.micType);
                                     case 'recNum'
@@ -443,11 +462,22 @@ classdef callData
                                         callIdx = callIdx & recNumIdx;
                                         %callIdx = callIdx & cellfun(@(x) ~isempty(strfind(x,S(1).subs{idx+1})),cData.recNum);
                                     case 'sessionID'
-                                        callIdx = callIdx & cellfun(@(x) ~isempty(strfind(x,S(1).subs{idx+1})),cData.sessionID);
+                                        sessionIDIdx = false(cData.nCalls,1);
+                                        for sI = S(1).subs{idx+1}
+                                            sessionIDIdx = sessionIDIdx | cData.sessionID==sI;
+                                        end
+                                        callIdx = callIdx & sessionIDIdx;                                        
+%                                        callIdx = callIdx & cellfun(@(x) ~isempty(strfind(x,S(1).subs{idx+1})),cData.sessionID);
+                                    case 'callLength'
+                                        callLengthIdx = false(cData.nCalls,1);
+                                        for cL = S(1).subs{idx+1}
+                                            callLengthIdx = callLengthIdx | cData.callLength==cL;
+                                        end
+                                        callIdx = callIdx & callLengthIdx;
                                     case 'sessionType'
                                         sessionTypeIdx = false(cData.nCalls,1);
                                         for sT = S(1).subs{idx+1}
-                                            sessionTypeIdx = sessionTypeIdx | cellfun(@(x) ~isempty(strfind(x,sT)),cData.sessionType);
+                                            sessionTypeIdx = sessionTypeIdx | strcmp(sT,cData.sessionType);
                                         end
                                         callIdx = callIdx & sessionTypeIdx;
                                         %callIdx = callIdx & cellfun(@(x) ~isempty(strfind(x,S(1).subs{idx+1})),cData.sessionType);
@@ -535,9 +565,11 @@ switch cData.expType
     case 'pratData'
         callWF = audioread([cData.baseDirs cData.fName{call_k}]);
     case 'autoTrain'
-        callWF = load([cData.baseDirs cData.fName{call_k}]);
-        callWF = callWF.convData';
-    otherwise
+       if ~isempty(cData.fName{call_k})
+            callWF = load([cData.baseDirs cData.fName{call_k}]);
+            callWF = callWF.convData';
+       end
+            otherwise
         display('No functionality to load callWF for the experiment type');
         keyboard;
 end
