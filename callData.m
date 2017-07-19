@@ -64,12 +64,12 @@ classdef callData
         pitchGoodnessWin
         cepstralF0Win
         
-        maxCalls = 80000
+        maxCalls = 40000
         minF0 = 100 % in Hz
         maxF0 = 20e3 % in Hz
         
-        windowLength = 5e-3 % in ms
-        overlap = 4e-3 % in ms
+        windowLength = 20e-3 % in ms
+        overlap = 10e-3 % in ms
         thresh = 0.1
         
         loadWF = true % Load in all call waveforms or not
@@ -80,17 +80,17 @@ classdef callData
     end
     methods
         function cData = callData(fs, expType) % Function to initialize, load, and perform calculations
-            cData.fs = fs; 
+            cData.fs = fs;
             cData.expType = expType;
             
             % initialize all parameters:
             
             cData = load_call_data(cData);
             
-            [cData.daysOld, cData.yinF0, cData.spCorrF0, cData.callLength, ...
+            [cData.daysOld, cData.yinF0, cData.spCorrF0,...
                 cData.weinerEntropy, cData.spectralEntropy, cData.centroid,...
                 cData.energyEntropy, cData.RMS, cData.ap0,cData.pitchGoodness,...
-                cData.cepstralF0] = deal(zeros(cData.nCalls,1)); 
+                cData.cepstralF0] = deal(zeros(cData.nCalls,1));
             
             [cData.yinF0Win, cData.ap0Win, cData.weinerEntropyWin,...
                 cData.spectralEntropyWin, cData.centroidWin,cData.energyEntropyWin,...
@@ -99,16 +99,18 @@ classdef callData
             
             tapers = dpss(cData.windowLength*cData.fs,1.5);
             
+            if cData.loadWF
+               cData.callLength = zeros(cData.nCalls,1); 
+            end
+            
             % iterate through all calls
             for call_k = 1:cData.nCalls
                 
                 if cData.loadWF % if we already loaded all the data into this object
                     callWF = cData.callWF{call_k};
                 else % if we need to load this data on the fly
-                    if ~isempty(cData.fName{call_k})
                     callWF = loadCallWF_onTheFly(cData,call_k);
-                    cData.callLength(call_k) = length(callWF)/fs;
-                    end
+                    cData.callLength(call_k) = length(callWF);
                 end
                 
                 % Assemble parameter structure for yin algorithm
@@ -153,7 +155,7 @@ classdef callData
                 if cData.spCorrFlag % if we want to use the spCorr algorithm
                     cData.spCorrF0(call_k) = calculate_spCorr_F0(cData,call_k);
                 end
-
+                
                 if cData.cepstralFlag % if we want to use the cepstral algorithm
                     [pg, idx] = max(cData.pitchGoodnessWin{call_k});
                     cData.pitchGoodness(call_k) = pg;
@@ -175,7 +177,7 @@ classdef callData
                     cData.birthDates = {datetime(2016,4,23),datetime(2016,09,24),datetime(2016,09,21)};
                     cData.nBats = length(cData.batNums);
                     analyzed_audio_dir_str = 'Analyzed_auto';
-                                        
+                    
                     [cData.callWF, cData.batNum, cData.fName] = deal(cell(cData.maxCalls,1));
                     [cData.daysOld, cData.callLength] = deal(zeros(cData.maxCalls,1));
                     cData.callPos = zeros(cData.maxCalls,2);
@@ -186,48 +188,34 @@ classdef callData
                         nlgDirs = dir([cData.baseDirs{b} 'bat' cData.batNums{b} filesep '*neurologger*']);
                         for d = 1:length(nlgDirs) % iterate across all recording days
                             audioDir = [cData.baseDirs{b} 'bat' cData.batNums{b} filesep nlgDirs(d).name filesep 'audio\ch1\'];
-                            analyzed_audio_dir = [audioDir analyzed_audio_dir_str filesep];
-                            callFiles = dir([analyzed_audio_dir 'call*.wav']);
-                            if ~isempty(callFiles)
-                                % get call data and time in recording
-                                % (corrected for clock drift)
-                                cut_call_data = get_corrected_call_times(audioDir,analyzed_audio_dir,'call');
-                                cutCalls = [cut_call_data.cutcalls];
+                            % get call data and time in recording
+                            % (corrected for clock drift)
+                            s = load([audioDir 'cut_call_data.mat']);
+                            cut_call_data = s.cut_call_data;
+                            
+                            if ~isempty([cut_call_data.f_num])
+                                
+                                cutCalls = {cut_call_data.cut};
                                 call_pos_expDay = vertcat(cut_call_data.corrected_callpos);
                                 call_length_expDay = cellfun(@length, cutCalls)/cData.fs;
                                 
-                                % get manual classification of real calls
-                                % vs. noise
-                                try
-                                    s = load([analyzed_audio_dir 'juv_calls.mat']);
-                                catch
-                                    keyboard;
-                                end
-                                
-                                [~,idx] = sort(cellfun(@(x) str2double(regexp(x,'\d+','match')),{callFiles.name})); % sort files by filename numbering
-                                callFiles = callFiles(idx);
-                                % remove calls manually classified as noise
-                                juv_calls = s.juv_calls; 
-                                callFiles = callFiles(juv_calls ~= -1);
-                                cutCalls = cutCalls(juv_calls ~= -1);
-                                call_pos_expDay = call_pos_expDay(juv_calls ~= -1, :);
-                                call_length_expDay = call_length_expDay(juv_calls ~= -1);
                                 expDatetime = datetime(nlgDirs(d).name(end-7:end),'InputFormat',cData.dateFormat);
                                 
-                                for c = 1:length(callFiles)
-                                    cData.callWF{call_k} = cutCalls{c};
-                                    cData.callLength(call_k) = call_length_expDay(c);
-                                    cData.callPos(call_k,:) = call_pos_expDay(c,:);
-                                    cData.expDay{call_k} = expDatetime;
-                                    cData.batNum{call_k} = cData.batNums{b};
-                                    cData.daysOld(call_k) = days(expDatetime - cData.birthDates{b});
-                                    cData.fName{call_k} = [analyzed_audio_dir callFiles(c).name];
-                                    call_k = call_k + 1;
+                                for c = 1:length(cutCalls)
+                                    if ~cut_call_data(c).noise
+                                        cData.callWF{call_k} = cutCalls{c};
+                                        cData.callLength(call_k) = call_length_expDay(c);
+                                        cData.callPos(call_k,:) = call_pos_expDay(c,:);
+                                        cData.expDay(call_k) = expDatetime;
+                                        cData.batNum{call_k} = cData.batNums{b};
+                                        cData.daysOld(call_k) = days(expDatetime - cData.birthDates{b});
+                                        cData.fName{call_k} = cut_call_data(c).fName;
+                                        call_k = call_k + 1;
+                                    end
                                 end
                             end
                         end
                     end
-                    cData.nCalls = call_k-1;
                    
                     
                 case 'lesions'
@@ -274,7 +262,6 @@ classdef callData
                             end
                         end
                     end
-                    cData.nCalls = call_k-1;
                     
                 case 'deafened'
                     
@@ -321,34 +308,25 @@ classdef callData
                             end
                         end
                     end
-                    cData.nCalls = call_k-1;
                     
                 case 'autoTrain'
-                    cData.loadWF = false;
                     cData.baseDirs = 'C:\Users\tobias\Desktop\analysis\bataudio\call groups\all\';
-                    %cData.baseDirs = 'C:\Users\tobias\Desktop\analysis\bataudio\April2017\cut_preprocessed\';
                     %cData.baseDirs = 'C:\Users\tobias\Desktop\analysis\bataudio\test\';
                     callFiles = dir([cData.baseDirs '*.mat']);
                     cData.nCalls = length(callFiles);
-                    [cData.fName, cData.batName, cData.callType, cData.micType, cData.sessionType] = deal(cell(cData.nCalls,1)); % initialize call data cells
-                    [cData.recNum, cData.callNum, cData.xrun, cData.sessionID,] = deal(zeros(cData.nCalls,1)); % initialize call data arrays
+                    [cData.callWF, cData.fName,cData.sessionID, cData.batName, cData.callType, cData.micType, cData.sessionType] = deal(cell(cData.nCalls,1)); % initialize call data cells
+                    [cData.recNum, cData.callNum, cData.xrun] = deal(zeros(cData.nCalls,1)); % initialize call data arrays
                     cData.expDay = datetime([],[],[]);
+                    
                     for call_k = 1:length(callFiles)
                         s = load([cData.baseDirs callFiles(call_k).name]);
                         cData.fName{call_k} = callFiles(call_k).name;
                         cData.batName{call_k} = s.batName;
                         cData.sessionType{call_k} = s.sessionType;
-                        %cData.callWF{call_k} = s.rawData';
+                        cData.callWF{call_k} = s.rawData.';
                         cData.callNum(call_k) = s.callNum;
                         cData.recNum(call_k) = s.recNum;
-                        sessID = s.sessionID;
-                        if ischar(sessID)
-                            sessID = str2double(sessID);
-                        end
-                        if size(sessID) == [1 2]
-                            sessID = 0;
-                        end
-                        cData.sessionID(call_k) = sessID;
+                        cData.sessionID{call_k} = s.sessionID;
                         if isfield(s,'xrun')
                             cData.xrun(call_k) = s.xrun;
                         else
@@ -362,7 +340,15 @@ classdef callData
                         cData.callType{call_k} = s.callType;
                         cData.micType{call_k} = s.micType;
                     end
-                    cData.expDay = cData.expDay';              
+                    cData.expDay = cData.expDay';
+                    callProperties = properties(cData)';
+                    for prop = callProperties
+                        if all(size(cData.(prop{:})) == [cData.maxCalls,1])
+                            cData.(prop{:}) = cData.(prop{:})(1:cData.nCalls);
+                        elseif size(cData.(prop{:}),1) == cData.maxCalls && size(cData.(prop{:}),1) > 1
+                            cData.(prop{:}) = cData.(prop{:})(1:cData.nCalls,:);
+                        end
+                    end                    
                     
                 case 'pratData'
                     cData.loadWF = false;
@@ -391,7 +377,7 @@ classdef callData
             % if we initialized different data structures to have a length
             % of 'maxCalls' go ahead and shorten those to remove empty
             % elements
-            
+            cData.nCalls = call_k-1;
             callProperties = properties(cData)';
             for prop = callProperties
                 if all(size(cData.(prop{:})) == [cData.maxCalls,1])
@@ -414,9 +400,9 @@ classdef callData
                                     case 'cellInfo'
                                         callIdx = callIdx & strcmp(cData.cellInfo,S(1).subs{idx+1});
                                     case 'daysOld'
-                                        daysOldIdx = false(cData.nCalls,1); %make an index assuming all 0 initially
-                                        for d = S(1).subs{idx+1} %for the input that you're searching for
-                                            daysOldIdx = daysOldIdx | cData.daysOld==d; %make true if the day of indexed call is listed
+                                        daysOldIdx = false(cData.nCalls,1);
+                                        for d = S(1).subs{idx+1}
+                                            daysOldIdx = daysOldIdx | cData.daysOld==d;
                                         end
                                         callIdx = callIdx & daysOldIdx;
                                     case 'expDay'
@@ -432,26 +418,16 @@ classdef callData
                                     case 'batName'
                                         batNameIdx = false(cData.nCalls,1);
                                         for bN = S(1).subs{idx+1}
-                                            batNameIdx = batNameIdx | ~cellfun(@isempty, strfind(cData.batName,bN)); %cellfun(@(x) ~isempty(strfind(x,bN)),cData.batName);
+                                            batNameIdx = batNameIdx | cellfun(@(x) ~isempty(strfind(x,bN)),cData.batName);
                                         end
                                         callIdx = callIdx & batNameIdx;
                                         %callIdx = callIdx & cellfun(@(x) ~isempty(strfind(x,S(1).subs{idx+1})),cData.batName);                                       
                                     case 'callNum'
-                                        callNumIdx = false(cData.nCalls,1);
-                                        for rN = S(1).subs{idx+1}
-                                            callNumIdx = callNumIdx | cData.callNum==rN;
-                                        end
-                                        callIdx = callIdx & callNumIdx;
-                                        %callIdx = callIdx & cellfun(@(x) ~isempty(strfind(x,S(1).subs{idx+1})),cData.callNum);
+                                        callIdx = callIdx & cellfun(@(x) ~isempty(strfind(x,S(1).subs{idx+1})),cData.callNum);
                                     case 'callTrigger'
                                         callIdx = callIdx & (cData.callTrigger >= S(1).subs{idx+1}(1) & cData.callTrigger <= S(1).subs{idx+1}(2));
                                     case 'callType'
-                                        callTypeIdx = false(cData.nCalls,1);
-                                        for cT = S(1).subs{idx+1}
-                                            callTypeIdx = callTypeIdx | cellfun(@(x) ~isempty(strfind(x,cT)),cData.callType);
-                                        end
-                                        callIdx = callIdx & callTypeIdx;
-                                        %callIdx = callIdx & cellfun(@(x) ~isempty(strfind(x,S(1).subs{idx+1})),cData.callType);
+                                        callIdx = callIdx & cellfun(@(x) ~isempty(strfind(x,S(1).subs{idx+1})),cData.callType);
                                     case 'micType'
                                         callIdx = callIdx & cellfun(@(x) ~isempty(strfind(x,S(1).subs{idx+1})),cData.micType);
                                     case 'recNum'
@@ -462,22 +438,11 @@ classdef callData
                                         callIdx = callIdx & recNumIdx;
                                         %callIdx = callIdx & cellfun(@(x) ~isempty(strfind(x,S(1).subs{idx+1})),cData.recNum);
                                     case 'sessionID'
-                                        sessionIDIdx = false(cData.nCalls,1);
-                                        for sI = S(1).subs{idx+1}
-                                            sessionIDIdx = sessionIDIdx | cData.sessionID==sI;
-                                        end
-                                        callIdx = callIdx & sessionIDIdx;                                        
-%                                        callIdx = callIdx & cellfun(@(x) ~isempty(strfind(x,S(1).subs{idx+1})),cData.sessionID);
-                                    case 'callLength'
-                                        callLengthIdx = false(cData.nCalls,1);
-                                        for cL = S(1).subs{idx+1}
-                                            callLengthIdx = callLengthIdx | cData.callLength==cL;
-                                        end
-                                        callIdx = callIdx & callLengthIdx;
+                                        callIdx = callIdx & cellfun(@(x) ~isempty(strfind(x,S(1).subs{idx+1})),cData.sessionID);
                                     case 'sessionType'
                                         sessionTypeIdx = false(cData.nCalls,1);
                                         for sT = S(1).subs{idx+1}
-                                            sessionTypeIdx = sessionTypeIdx | strcmp(sT,cData.sessionType);
+                                            sessionTypeIdx = sessionTypeIdx | cellfun(@(x) ~isempty(strfind(x,sT)),cData.sessionType);
                                         end
                                         callIdx = callIdx & sessionTypeIdx;
                                         %callIdx = callIdx & cellfun(@(x) ~isempty(strfind(x,S(1).subs{idx+1})),cData.sessionType);
@@ -565,11 +530,8 @@ switch cData.expType
     case 'pratData'
         callWF = audioread([cData.baseDirs cData.fName{call_k}]);
     case 'autoTrain'
-       if ~isempty(cData.fName{call_k})
-            callWF = load([cData.baseDirs cData.fName{call_k}]);
-            callWF = callWF.convData';
-       end
-            otherwise
+        ...
+    otherwise
         display('No functionality to load callWF for the experiment type');
         keyboard;
 end
