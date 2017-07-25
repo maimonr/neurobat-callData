@@ -221,6 +221,7 @@ classdef callData
                             end
                         end
                     end
+                    cData.nCalls = call_k-1;
                    
                     
                 case 'lesions'
@@ -267,6 +268,7 @@ classdef callData
                             end
                         end
                     end
+                    cData.nCalls = call_k-1;
                     
                 case 'deafened'
                     
@@ -313,6 +315,7 @@ classdef callData
                             end
                         end
                     end
+                    cData.nCalls = call_k-1;
                     
                 case 'autoTrain'
                     cData.loadWF = false;
@@ -382,7 +385,6 @@ classdef callData
             % if we initialized different data structures to have a length
             % of 'maxCalls' go ahead and shorten those to remove empty
             % elements
-            cData.nCalls = call_k-1;
             callProperties = properties(cData)';
             for prop = callProperties
                 if all(size(cData.(prop{:})) == [cData.maxCalls,1])
