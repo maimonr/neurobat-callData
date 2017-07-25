@@ -41,6 +41,7 @@ classdef callData
         fName % file path to call file
         nCalls % total number of calls
         callLength % length of call
+        file_call_pos % % (for 'ephys') position in samples during session
         callPos % (for 'ephys') position in samples during session
         yinF0 % 'best' fundamental freq. calculated using the yin algorithm
         spCorrF0 % mean fundamental freq. calculated using the spCorr algorithm
@@ -87,7 +88,7 @@ classdef callData
             
             cData = load_call_data(cData);
             
-            [cData.daysOld, cData.yinF0, cData.spCorrF0, cData.callLength, ...
+            [cData.yinF0, cData.spCorrF0,...
                 cData.weinerEntropy, cData.spectralEntropy, cData.centroid,...
                 cData.energyEntropy, cData.RMS, cData.ap0,cData.pitchGoodness,...
                 cData.cepstralF0] = deal(zeros(cData.nCalls,1)); 
@@ -98,6 +99,10 @@ classdef callData
                 = deal(cell(cData.nCalls,1));
             
             tapers = dpss(cData.windowLength*cData.fs,1.5);
+            
+            if ~cData.loadWF
+               cData.callLength = zeros(cData.nCalls,1); 
+            end
             
             % iterate through all calls
             for call_k = 1:cData.nCalls
@@ -174,11 +179,11 @@ classdef callData
                     cData.dateFormat = 'yyyyMMdd';
                     cData.birthDates = {datetime(2016,4,23),datetime(2016,09,24),datetime(2016,09,21)};
                     cData.nBats = length(cData.batNums);
-                    analyzed_audio_dir_str = 'Analyzed_auto';
-                                        
+                    
                     [cData.callWF, cData.batNum, cData.fName] = deal(cell(cData.maxCalls,1));
                     [cData.daysOld, cData.callLength] = deal(zeros(cData.maxCalls,1));
                     cData.callPos = zeros(cData.maxCalls,2);
+                    cData.file_call_pos = zeros(cData.maxCalls,2);
                     cData.expDay = datetime([],[],[]);
                     
                     call_k = 1;
@@ -186,48 +191,36 @@ classdef callData
                         nlgDirs = dir([cData.baseDirs{b} 'bat' cData.batNums{b} filesep '*neurologger*']);
                         for d = 1:length(nlgDirs) % iterate across all recording days
                             audioDir = [cData.baseDirs{b} 'bat' cData.batNums{b} filesep nlgDirs(d).name filesep 'audio\ch1\'];
-                            analyzed_audio_dir = [audioDir analyzed_audio_dir_str filesep];
-                            callFiles = dir([analyzed_audio_dir 'call*.wav']);
-                            if ~isempty(callFiles)
-                                % get call data and time in recording
-                                % (corrected for clock drift)
-                                cut_call_data = get_corrected_call_times(audioDir,analyzed_audio_dir,'call');
-                                cutCalls = [cut_call_data.cutcalls];
-                                call_pos_expDay = vertcat(cut_call_data.corrected_callpos);
+                            % get call data and time in recording
+                            % (corrected for clock drift)
+                            s = load([audioDir 'cut_call_data.mat']);
+                            cut_call_data = s.cut_call_data;
+                            
+                            if ~isempty([cut_call_data.f_num])
+                                
+                                cutCalls = {cut_call_data.cut};
+                                call_pos_expDay = vertcat(cut_call_data.corrected_callpos)/1e3; % convert to seconds
+                                file_call_pos_expDay = vertcat(cut_call_data.callpos);
                                 call_length_expDay = cellfun(@length, cutCalls)/cData.fs;
                                 
-                                % get manual classification of real calls
-                                % vs. noise
-                                try
-                                    s = load([analyzed_audio_dir 'juv_calls.mat']);
-                                catch
-                                    keyboard;
-                                end
-                                
-                                [~,idx] = sort(cellfun(@(x) str2double(regexp(x,'\d+','match')),{callFiles.name})); % sort files by filename numbering
-                                callFiles = callFiles(idx);
-                                % remove calls manually classified as noise
-                                juv_calls = s.juv_calls; 
-                                callFiles = callFiles(juv_calls ~= -1);
-                                cutCalls = cutCalls(juv_calls ~= -1);
-                                call_pos_expDay = call_pos_expDay(juv_calls ~= -1, :);
-                                call_length_expDay = call_length_expDay(juv_calls ~= -1);
                                 expDatetime = datetime(nlgDirs(d).name(end-7:end),'InputFormat',cData.dateFormat);
                                 
-                                for c = 1:length(callFiles)
-                                    cData.callWF{call_k} = cutCalls{c};
-                                    cData.callLength(call_k) = call_length_expDay(c);
-                                    cData.callPos(call_k,:) = call_pos_expDay(c,:);
-                                    cData.expDay{call_k} = expDatetime;
-                                    cData.batNum{call_k} = cData.batNums{b};
-                                    cData.daysOld(call_k) = days(expDatetime - cData.birthDates{b});
-                                    cData.fName{call_k} = [analyzed_audio_dir callFiles(c).name];
-                                    call_k = call_k + 1;
+                                for c = 1:length(cutCalls)
+                                    if ~cut_call_data(c).noise
+                                        cData.callWF{call_k} = cutCalls{c};
+                                        cData.callLength(call_k) = call_length_expDay(c);
+                                        cData.callPos(call_k,:) = call_pos_expDay(c,:);
+                                        cData.file_call_pos(call_k,:) = file_call_pos_expDay(c,:);
+                                        cData.expDay(call_k) = expDatetime;
+                                        cData.batNum{call_k} = cData.batNums{b};
+                                        cData.daysOld(call_k) = days(expDatetime - cData.birthDates{b});
+                                        cData.fName{call_k} = cut_call_data(c).fName;
+                                        call_k = call_k + 1;
+                                    end
                                 end
                             end
                         end
                     end
-                    cData.nCalls = call_k-1;
                    
                     
                 case 'lesions'
@@ -274,7 +267,6 @@ classdef callData
                             end
                         end
                     end
-                    cData.nCalls = call_k-1;
                     
                 case 'deafened'
                     
@@ -321,7 +313,6 @@ classdef callData
                             end
                         end
                     end
-                    cData.nCalls = call_k-1;
                     
                 case 'autoTrain'
                     cData.loadWF = false;
@@ -391,7 +382,7 @@ classdef callData
             % if we initialized different data structures to have a length
             % of 'maxCalls' go ahead and shorten those to remove empty
             % elements
-            
+            cData.nCalls = call_k-1;
             callProperties = properties(cData)';
             for prop = callProperties
                 if all(size(cData.(prop{:})) == [cData.maxCalls,1])
@@ -763,4 +754,3 @@ tmp=rceps(frame);
 f0 = (1/idx)*fs;
 
 end
-
