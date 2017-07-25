@@ -70,7 +70,7 @@ classdef callData
         maxF0 = 20e3 % in Hz
         
         windowLength = 6e-3 % in ms
-        overlap = 4e-3 % in ms
+        overlap = 5e-3 % in ms
         thresh = 0.1
         
         loadWF = true % Load in all call waveforms or not
