@@ -69,7 +69,7 @@ classdef callData
         minF0 = 100 % in Hz
         maxF0 = 20e3 % in Hz
         
-        windowLength = 10e-3 % in ms
+        windowLength = 7e-3 % in ms
         overlap = 5e-3 % in ms
         thresh = 0.1
         
