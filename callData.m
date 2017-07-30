@@ -271,8 +271,8 @@ classdef callData
                     cData.nCalls = call_k-1;
                     
                 case 'deafened'
-                    
-                    cData.baseDirs = 'E:\deafened_recordings\all_recordings\';
+                    cData.loadWF = false;
+                    cData.baseDirs = 'E:\deafened_recordings\all_cut_calls\';
                     cData.birthDates = {datetime(2016,9,14),datetime(2016,9,27),datetime(2016,8,19),datetime(2016,09,21),NaN,NaN};
                     cData.deafenedBats = logical([1 1 0 0 0 0]);
                     cData.batNums = {'71315','71354','65696','71353','1','2'};
@@ -281,9 +281,7 @@ classdef callData
                     batGroups = [1 1 2 2 3 3];
                     
                     cData.dateFormat = 'yyyyMMdd';
-                    data_var_name = 'finalcut';
                     preceding_date_str = 'Box1';
-                    
                     
                     [cData.callWF, cData.fName, cData.treatment] = deal(cell(cData.maxCalls,1));
                     [cData.callLength, cData.daysOld] = deal(zeros(cData.maxCalls,1));
@@ -300,16 +298,12 @@ classdef callData
                                 cData.treatment{call_k} = treatmentTypes{t};
                                 idx = strfind(callFiles(c).name,preceding_date_str) + length(preceding_date_str) + 1;
                                 exp_date_str = callFiles(c).name(idx:idx+length(cData.dateFormat)-1);
-                                data = load([analyzed_audio_dir callFiles(c).name],data_var_name);
-                                cutCall = data.(data_var_name);
                                 cData.expDay(call_k) = datetime(exp_date_str,'inputFormat',cData.dateFormat);
                                 if isdatetime(avg_birth_date)
-                                    cData.daysOld(call_k) = days(cData.expDay{call_k} - avg_birth_date);
+                                    cData.daysOld(call_k) = days(cData.expDay(call_k) - avg_birth_date);
                                 else
                                     cData.daysOld(call_k) = NaN;
                                 end
-                                cData.callWF{call_k} = cutCall';
-                                cData.callLength(call_k) = length(cutCall)/cData.fs;
                                 cData.fName{call_k} = [analyzed_audio_dir callFiles(c).name];
                                 call_k = call_k + 1;
                             end
@@ -558,11 +552,19 @@ switch cData.expType
     case 'pratData'
         callWF = audioread([cData.baseDirs cData.fName{call_k}]);
     case 'autoTrain'
-       if ~isempty(cData.fName{call_k})
+        if ~isempty(cData.fName{call_k})
             callWF = load([cData.baseDirs cData.fName{call_k}]);
             callWF = callWF.convData';
-       end
-            otherwise
+        end
+    case 'deafened'
+        callWF = load(cData.fName{call_k});
+        try
+            callWF = callWF.cut;
+        catch
+            callWF = callWF.finalcut;
+        end
+        callWF = reshape(callWF,numel(callWF),1);
+    otherwise
         display('No functionality to load callWF for the experiment type');
         keyboard;
 end
