@@ -20,6 +20,7 @@ classdef callData
         cepstralFlag = false % perform cepstral analysis?
         spCorrFlag = false % perform spCorr analysis?
         batName %name of bat pairs in training
+        batchNum % for experiments in separate batches
         callNum %call number (subset of recNum)
         recNum %recording number for the training session
         callTrigger %dt for autTrain
@@ -28,6 +29,7 @@ classdef callData
         sessionID %numerical counter for each sessionTye
         micType %which box/microphone used
         xrun %dropped sample number
+        callID %unique ID for each call
                 
         fs % sampling rate
         expType % String indicating which experiment we are dealing with
@@ -222,7 +224,7 @@ classdef callData
                                         cData.callLength(call_k) = call_length_expDay(c);
                                         cData.callPos(call_k,:) = call_pos_expDay(c,:);
                                         cData.file_call_pos(call_k,:) = file_call_pos_expDay(c,:);
-                                        cData.expDay(call_k) = expDatetime;
+                                        cData.expDay(call_k,1) = expDatetime;
                                         cData.batNum{call_k} = cData.batNums{b};
                                         cData.daysOld(call_k) = days(expDatetime - cData.birthDates{b});
                                         cData.fName{call_k} = cut_call_data(c).fName;
@@ -303,9 +305,10 @@ classdef callData
                     
                     cData.dateFormat = 'yyyyMMdd';
                     dateRegExp = '_\d{8}T';
+                    batchRegExp = '(?<=Batch)\d*';
                     
                     [cData.callWF, cData.fName, cData.treatment] = deal(cell(cData.maxCalls,1));
-                    [cData.callLength, cData.daysOld] = deal(zeros(cData.maxCalls,1));
+                    [cData.callLength, cData.daysOld, cData.batchNum] = deal(zeros(cData.maxCalls,1));
                     cData.expDay = datetime([],[],[]);
                     
                     call_k = 1;
@@ -322,10 +325,9 @@ classdef callData
                                 cData.expDay(call_k) = datetime(exp_date_str,'inputFormat',cData.dateFormat);
                                 if isdatetime(avg_birth_date)
                                     cData.daysOld(call_k) = days(cData.expDay(call_k) - avg_birth_date);
-                                else
-                                    cData.daysOld(call_k) = NaN;
                                 end
                                 cData.fName{call_k} = [analyzed_audio_dir callFiles(c).name];
+                                cData.batchNum(call_k) = str2double(cell2mat(regexp(callFiles(c).name,batchRegExp,'match')));
                                 call_k = call_k + 1;
                             end
                         end
@@ -447,7 +449,13 @@ classdef callData
                                             batNameIdx = batNameIdx | ~cellfun(@isempty, strfind(cData.batName,bN)); %cellfun(@(x) ~isempty(strfind(x,bN)),cData.batName);
                                         end
                                         callIdx = callIdx & batNameIdx;
-                                        %callIdx = callIdx & cellfun(@(x) ~isempty(strfind(x,S(1).subs{idx+1})),cData.batName);                                       
+                                        %callIdx = callIdx & cellfun(@(x) ~isempty(strfind(x,S(1).subs{idx+1})),cData.batName);
+                                    case 'batchNum'
+                                        batchNumIdx = false(cData.nCalls,1);
+                                        for bN = S(1).subs{idx+1}
+                                            batchNumIdx = batchNumIdx | cData.batchNum == bN;
+                                        end
+                                        callIdx = callIdx & batchNumIdx;
                                     case 'callNum'
                                         callNumIdx = false(cData.nCalls,1);
                                         for rN = S(1).subs{idx+1}
