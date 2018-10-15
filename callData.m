@@ -1,13 +1,13 @@
-classdef callData 
-% CallData Version 2.0 Maimon Rose 06/30/17 
-% Includes the following experiment types: Maimon's ephys, Deafened bats,
-% Lesioned bats, and Tobias' automatic training.
-% 
-% Construct a callData object as follows: 
-%
-% cData = callData(fs,expType)
-% fs - audio sampling rate in Hz
-% expType - string correspoding to experiment type
+classdef callData
+    % CallData Version 2.0 Maimon Rose 06/30/17
+    % Includes the following experiment types: Maimon's ephys, Deafened bats,
+    % Lesioned bats, and Tobias' automatic training.
+    %
+    % Construct a callData object as follows:
+    %
+    % cData = callData(fs,expType)
+    % fs - audio sampling rate in Hz
+    % expType - string correspoding to experiment type
     
     properties(SetAccess = public)
         baseDirs % directories to search for call files
@@ -15,9 +15,10 @@ classdef callData
         dateFormat % format for importing dates as datetimes
         birthDates % DOBs for all bats
         treatment
+        treatmentType
         lesionedBats % which bats are lesioned (logical)
         nBats % number of bats
-        cepstralFlag = false % perform cepstral analysis?
+        cepstralFlag = true % perform cepstral analysis?
         spCorrFlag = false % perform spCorr analysis?
         batName %name of bat pairs in training
         batchNum % for experiments in separate batches
@@ -30,7 +31,8 @@ classdef callData
         micType %which box/microphone used
         xrun %dropped sample number
         callID %unique ID for each call
-                
+        callEcho % flag to load either calls or echolocations
+        
         fs % sampling rate
         expType % String indicating which experiment we are dealing with
         
@@ -40,6 +42,7 @@ classdef callData
         daysOld % number of days from birth for this call
         batNum % bat ID number correspoding to this call
         fName % file path to call file
+        fName_raw % file path to file from which call was cut
         nCalls % total number of calls
         callLength % length of call
         file_call_pos % % (for 'ephys') position in samples during session
@@ -56,7 +59,7 @@ classdef callData
         cepstralF0 % fundamental freq. calculated using a cepstral algorithm
         
         % parameters as above, broken down into windows during the call:
-        yinF0Win 
+        yinF0Win
         ap0Win
         weinerEntropyWin
         spectralEntropyWin
@@ -71,8 +74,8 @@ classdef callData
         minF0 = 200 % in Hz
         maxF0 = 20e3 % in Hz
         
-        windowLength = 5e-3 % in ms
-        integrationWindow = 4e-3
+        windowLength = 1.5e-3 % in ms
+        integrationWindow = 1.5e-3
         overlap = 1e-3 % in ms
         thresh = 0.01
         yinF0_interp = false
@@ -84,18 +87,18 @@ classdef callData
         youngestAge
     end
     methods
-        function cData = callData(fs, expType) % Function to initialize, load, and perform calculations
-            cData.fs = fs; 
+        function cData = callData(fs, expType, varargin) % Function to initialize, load, and perform calculations
+            cData.fs = fs;
             cData.expType = expType;
             
             % initialize all parameters:
             
-            cData = load_call_data(cData);
+            cData = load_call_data(cData,varargin{:});
             
             [cData.yinF0, cData.spCorrF0,...
                 cData.weinerEntropy, cData.spectralEntropy, cData.centroid,...
                 cData.energyEntropy, cData.RMS, cData.ap0,cData.pitchGoodness,...
-                cData.cepstralF0] = deal(zeros(cData.nCalls,1)); 
+                cData.cepstralF0] = deal(zeros(cData.nCalls,1));
             
             [cData.yinF0Win, cData.ap0Win, cData.weinerEntropyWin,...
                 cData.spectralEntropyWin, cData.centroidWin,cData.energyEntropyWin,...
@@ -105,18 +108,19 @@ classdef callData
             tapers = dpss(cData.windowLength*cData.fs,1.5);
             
             if ~cData.loadWF
-               cData.callLength = zeros(cData.nCalls,1); 
+                cData.callLength = zeros(cData.nCalls,1);
             end
             
             % iterate through all calls
+            lastProgress = 0;
             for call_k = 1:cData.nCalls
                 
                 if cData.loadWF % if we already loaded all the data into this object
                     callWF = cData.callWF{call_k};
                 else % if we need to load this data on the fly
                     if ~isempty(cData.fName{call_k})
-                    callWF = loadCallWF_onTheFly(cData,call_k);
-                    cData.callLength(call_k) = length(callWF)/fs;
+                        callWF = loadCallWF_onTheFly(cData,call_k);
+                        cData.callLength(call_k) = length(callWF)/fs;
                     end
                 end
                 
@@ -129,7 +133,7 @@ classdef callData
                     'bufsize',nSamples+2,'APthresh',2.5,...
                     'maxf0',cData.maxF0,'minf0',cData.minF0);
                 
-                
+                addpath('C:\Users\phyllo\Documents\MATLAB\yin\')
                 [f0, ap0] = calculate_yin_F0(callWF,yinParams,cData.yinF0_interp);
                 cData.yinF0Win{call_k} = f0;
                 cData.ap0Win{call_k} = ap0;
@@ -150,7 +154,7 @@ classdef callData
                     'spCorrFlag',cData.spCorrFlag,'tapers',tapers,...
                     'maxF0',cData.maxF0,'minF0',cData.minF0);
                 
-                % calculate those features               
+                % calculate those features
                 
                 [cData.weinerEntropyWin{call_k},cData.spectralEntropyWin{call_k},...
                     cData.centroidWin{call_k},cData.energyEntropyWin{call_k},...
@@ -164,33 +168,51 @@ classdef callData
                 cData.centroid(call_k) = mean(cData.centroidWin{call_k});
                 cData.energyEntropy(call_k) = mean(cData.energyEntropyWin{call_k});
                 cData.RMS(call_k) = mean(cData.RMSWin{call_k});
-
+                
                 if cData.cepstralFlag % if we want to use the cepstral algorithm
-                     % **No longer using this method**
-                     % [pg, idx] = max(cData.pitchGoodnessWin{call_k});
-                     % cData.pitchGoodness(call_k) = pg;
-                     % cData.cepstralF0(call_k) = cData.cepstralF0Win{call_k}(idx);
-                     cData.pitchGoodness(call_k) = nanmedian(cData.pitchGoodnessWin{call_k});
-                     cData.cepstralF0(call_k) = nanmedian(cData.cepstralF0Win{call_k});
+                    % **No longer using this method**
+                    % [pg, idx] = max(cData.pitchGoodnessWin{call_k});
+                    % cData.pitchGoodness(call_k) = pg;
+                    % cData.cepstralF0(call_k) = cData.cepstralF0Win{call_k}(idx);
+                    cData.pitchGoodness(call_k) = nanmedian(cData.pitchGoodnessWin{call_k});
+                    cData.cepstralF0(call_k) = nanmedian(cData.cepstralF0Win{call_k});
                 end
                 
                 if cData.spCorrFlag
                     cData.spCorrF0(call_k) = nanmedian(cData.spCorrF0(call_k));
                 end
+                
+                progress = 100*(call_k/cData.nCalls);
+                
+                if mod(progress,10) < mod(lastProgress,10)
+                    fprintf('%d %% of calls processed\n',round(progress));
+                end
+                
+                lastProgress = progress;
+                
             end
             
         end
         function n = numArgumentsFromSubscript(obj,~,~)
             n = numel(obj);
         end
-        function cData = load_call_data(cData)
+        function cData = load_call_data(cData,varargin)
             
             switch cData.expType
-                case 'ephys' % Maimon's juvenile ephys experiments
-                    cData.baseDirs = {'Z:\users\Maimon\ephys\','E:\ephys\juvenile_recording\','E:\ephys\juvenile_recording\'};
-                    cData.batNums = {'71319','71284','71173'};
-                    cData.dateFormat = 'yyyyMMdd';
-                    cData.birthDates = {datetime(2016,4,23),datetime(2016,09,24),datetime(2016,09,21)};
+                case 'ephys' % Maimon's juvenile ephys experiments or Wujie's adult ephys experiments
+                    
+                    if ~isempty(varargin)
+                        juv_adult = varargin{1};
+                    else
+                        juv_adult = 'juvenile';
+                    end
+                    
+                    eData = ephysData(juv_adult);
+                    
+                    cData.baseDirs = eData.baseDirs;
+                    cData.batNums = eData.batNums;
+                    cData.dateFormat = eData.dateFormat;
+                    cData.birthDates = eData.birthDates;
                     cData.nBats = length(cData.batNums);
                     
                     [cData.callWF, cData.batNum, cData.fName] = deal(cell(cData.maxCalls,1));
@@ -198,16 +220,93 @@ classdef callData
                     cData.callPos = zeros(cData.maxCalls,2);
                     cData.file_call_pos = zeros(cData.maxCalls,2);
                     cData.expDay = datetime([],[],[]);
+                    nlg_rec_str = 'neurologger_recording';
+                    
+                    if isempty(cData.callEcho)
+                        cData.callEcho = input('Call or Echo?','s');
+                    end
+                    if strcmp(cData.callEcho,'call')
+                        cutFName = 'cut_call_data.mat';
+                    elseif strcmp(cData.callEcho,'echo')
+                        cutFName = 'cut_echo_data.mat';
+                    end
                     
                     call_k = 1;
                     for b = 1:cData.nBats % iterate across all experimental bats
-                        nlgDirs = dir([cData.baseDirs{b} 'bat' cData.batNums{b} filesep '*neurologger*']);
+                        switch juv_adult
+                            case 'juvenile'
+                                call_info_str = 'juv_call_info';
+                                nlg_dir_str = [cData.baseDirs{b} 'bat' cData.batNums{b} filesep '*neurologger*'];
+                            case 'adult'
+                                call_info_str = 'call_info';
+                                nlg_dir_str = [cData.baseDirs{b} '*neurologger*'];
+                        end
+                        
+                        nlgDirs = dir(nlg_dir_str);
                         for d = 1:length(nlgDirs) % iterate across all recording days
-                            audioDir = [cData.baseDirs{b} 'bat' cData.batNums{b} filesep nlgDirs(d).name filesep 'audio\ch1\'];
-                            % get call data and time in recording
-                            % (corrected for clock drift)
-                            s = load([audioDir 'cut_call_data.mat']);
-                            cut_call_data = s.cut_call_data;
+                            audioDir = [fullfile(nlgDirs(d).folder,nlgDirs(d).name) filesep 'audio\ch1\'];
+                            
+                            if strcmp(cData.callEcho,'echo')
+                                call_info_fName = [audioDir call_info_str '_' cData.batNums{b} '_echo.mat'];
+                                if ~exist(call_info_fName,'file')
+                                    continue
+                                end
+                                
+                                s = load(call_info_fName);
+                                call_info = s.call_info;
+                                
+                                s = load([audioDir cutFName]);
+                                cut_call_data = s.cut_call_data;
+                                cut_call_data = cut_call_data(~[cut_call_data.noise]);
+                                
+                                assert(all([cut_call_data.uniqueID] == [call_info.callID]));
+                                
+                                echo_calls = arrayfun(@(x) strcmp(x.echoCall,'juvEcho'),call_info);
+                                cut_call_data = cut_call_data(echo_calls);
+                            else
+                                % get call data and time in recording
+                                % (corrected for clock drift)
+                                s = load([audioDir cutFName]);
+                                cut_call_data = s.cut_call_data;
+                                if isempty(cut_call_data)
+                                   continue 
+                                end
+                                if strcmp(juv_adult,'adult')
+                                    
+                                    exp_day_idx = strfind(nlgDirs(d).name,nlg_rec_str) + length(nlg_rec_str);
+                                    expDate = nlgDirs(d).name(exp_day_idx:exp_day_idx+length(cData.dateFormat)-1);
+                                    
+                                    call_info_fname = dir([audioDir 'call_info_' cData.batNums{b} '_' cData.callEcho '_' expDate '.mat']);
+                                    
+                                    if isempty(call_info_fname)
+                                       continue 
+                                    end
+                                    
+                                    if length(call_info_fname) > 1
+                                        keyboard
+                                    end
+                                    s = load(fullfile(call_info_fname.folder,call_info_fname.name));
+                                    call_info = s.call_info;
+                                    
+                                    cut_call_data = cut_call_data(~[cut_call_data.noise]);
+                                    
+                                    batIdx = unique(cellfun(@(call) find(cellfun(@(bNum) strcmp(bNum,cData.batNums{b}),call)),{cut_call_data.batNum}));
+                                    
+                                    if length(batIdx) == 1
+                                        callpos = horzcat(cut_call_data.corrected_callpos);
+                                        callpos = callpos(batIdx,:);
+                                        [cut_call_data.corrected_callpos] = deal(callpos{:});
+                                    else
+                                        keyboard
+                                    end
+                                    
+                                    assert(all([cut_call_data.uniqueID] == [call_info.callID]));
+                                    
+                                    bat_calls = cellfun(@(x) ischar(x{1}) && contains(x,cData.batNums{b}),{call_info.behaviors});
+                                    cut_call_data = cut_call_data(bat_calls);
+                                    
+                                end
+                            end
                             
                             if ~isempty([cut_call_data.f_num])
                                 
@@ -215,11 +314,11 @@ classdef callData
                                 call_pos_expDay = vertcat(cut_call_data.corrected_callpos)/1e3; % convert to seconds
                                 file_call_pos_expDay = vertcat(cut_call_data.callpos);
                                 call_length_expDay = cellfun(@length, cutCalls)/cData.fs;
-                                
-                                expDatetime = datetime(nlgDirs(d).name(end-7:end),'InputFormat',cData.dateFormat);
+                                exp_day_idx = strfind(nlgDirs(d).name,nlg_rec_str) + length(nlg_rec_str);
+                                expDatetime = datetime(nlgDirs(d).name(exp_day_idx:exp_day_idx+length(cData.dateFormat)-1),'InputFormat',cData.dateFormat);
                                 
                                 for c = 1:length(cutCalls)
-                                    if ~cut_call_data(c).noise
+                                    if ~cut_call_data(c).noise && ~any(isnan(cut_call_data(c).corrected_callpos))
                                         cData.callWF{call_k} = cutCalls{c};
                                         cData.callLength(call_k) = call_length_expDay(c);
                                         cData.callPos(call_k,:) = call_pos_expDay(c,:);
@@ -228,6 +327,7 @@ classdef callData
                                         cData.batNum{call_k} = cData.batNums{b};
                                         cData.daysOld(call_k) = days(expDatetime - cData.birthDates{b});
                                         cData.fName{call_k} = cut_call_data(c).fName;
+                                        cData.callID(call_k) = cut_call_data(c).uniqueID;
                                         call_k = call_k + 1;
                                     end
                                 end
@@ -235,105 +335,141 @@ classdef callData
                         end
                     end
                     cData.nCalls = call_k-1;
-                   
                     
-                case 'lesions'
-                    cData.batNums = {'71309','71306','71303','71305','71308'};
-                    cData.nBats = length(cData.batNums);
-                    cData.baseDirs = 'Z:\users\Eva\ES lesion recordings\';
-                    cData.dateFormat = 'yyyyMMdd';
-                    cData.lesionedBats = logical([1 1 0 0 0]);
-                    cData.birthDates = {datetime(2016,11,27),datetime(2016,12,11),datetime(2016,10,25),datetime(2016,11,16),datetime(2016,10,19)};
-                    data_var_name = 'finalcut';
-                    treatmentTypes = {'lesioned','unmanipulated'};
-                    data_dir_strs = {'lesion','unmanipulated control'};
-                    batGroups = [1 1 2 2 2];
-                    preceding_date_str = 'Box1';
                     
-                    [cData.callWF, cData.batNum, cData.fName, cData.treatment] = deal(cell(cData.maxCalls,1));
-                    [cData.daysOld, cData.callLength] = deal(zeros(cData.maxCalls,1));
-                    cData.expDay = datetime([],[],[]);
+                case 'lesion'
                     
-                    call_k = 1;
-                    for t = 1:length(treatmentTypes)
-                        batIdx = batGroups == t;
-                        avg_birth_date = mean([cData.birthDates{batIdx}]);
-                        analyzed_audio_dir = [cData.baseDirs data_dir_strs{t} filesep];
-                        callFiles = dir([analyzed_audio_dir preceding_date_str '*Call*.mat']);
-                        if ~isempty(callFiles)
-                            for c = 1:length(callFiles)
-                                cData.treatment{call_k} = treatmentTypes{t};
-                                idx = strfind(callFiles(c).name,preceding_date_str) + length(preceding_date_str) + 1;
-                                exp_date_str = callFiles(c).name(idx:idx+length(cData.dateFormat)-1);
-                                data = load([analyzed_audio_dir callFiles(c).name],data_var_name);
-                                cutCall = data.(data_var_name);
-                                cData.callWF{call_k} = cutCall';
-                                cData.callLength(call_k) = length(cutCall)/cData.fs;
-                                
-                                cData.expDay(call_k) = datetime(exp_date_str,'inputFormat',cData.dateFormat);
-                                cData.fName{call_k} = [analyzed_audio_dir callFiles(c).name];
-                                if isdatetime(avg_birth_date)
-                                    cData.daysOld(call_k) = days(cData.expDay{call_k} - avg_birth_date);
-                                else
-                                    cData.daysOld(call_k) = NaN;
-                                end
-                                call_k = call_k + 1;
-                            end
-                        end
-                    end
-                    cData.nCalls = call_k-1;
-                    
-                case 'deafened'
+                    maxBatchNums = 5;
+                    batchNums = 1:maxBatchNums;
                     cData.loadWF = false;
-                    cData.baseDirs = [repmat({'E:\deafened_recordings\all_cut_calls\'},1,2),...
-                        repmat({'E:\unmanipulated_recordings\all_cut_calls\'},1,2),...
-                        repmat({'E:\deafened_recordings\all_cut_calls\'},1,2)];
-                    cData.birthDates = {datetime(2016,9,14),datetime(2016,9,27),...
-                        datetime(2016,8,19),datetime(2016,09,24),NaN,NaN,...
-                        datetime(2016,10,10),datetime(2016,10,20),datetime(2016,10,25),...
-                        datetime(2016,11,16),datetime(2016,10,19),NaN,NaN,...
-                        NaN,NaN,NaN,NaN};
-                    cData.batNums = {'71315','71354','65696','71353','1','2',...
-                        '11630','14418','71303','71305','71308','65994',...
-                        '65695','71333','71296','71177','60005'};
-                    treatmentTypes = {'deaf','saline','adult','unmanipulated',...
-                        'adultDeaf','adultSaline'};
-                    data_dir_strs = {'deafened','saline_control',...
-                        'adult_control','age_matched_control',...
-                        'adult_deafened','adult_saline_control'};
-                    batGroups = [1 1 2 2 3 3 4 4 4 4 4 5 5 5 6 6 6];
+                    s = load('E:\lesion_recordings\all_lesion_bat_info.mat','all_lesion_bat_info');
+                    batInfo = s.all_lesion_bat_info;
                     
                     cData.dateFormat = 'yyyyMMdd';
                     dateRegExp = '_\d{8}T';
-                    batchRegExp = '(?<=Batch)\d*';
                     
                     [cData.callWF, cData.fName, cData.treatment] = deal(cell(cData.maxCalls,1));
                     [cData.callLength, cData.daysOld, cData.batchNum] = deal(zeros(cData.maxCalls,1));
                     cData.expDay = datetime([],[],[]);
+                    cData.callID = [1:cData.maxCalls]';
+                    
+                    treatmentGroups = fieldnames(batInfo)';
+                    
+                    if ~isempty(varargin)
+                        varargin = varargin{1};
+                        for subs_k = 1:2:length(varargin)
+                            switch varargin{subs_k}
+                                
+                                case 'treatment'
+                                    treatmentGroups = treatmentGroups(ismember(treatmentGroups,varargin{subs_k+1}));
+                                case 'batchNum'
+                                    batchNums = varargin{subs_k+1};
+                            end
+                            
+                        end
+                    end
+                    
                     
                     call_k = 1;
-                    for t = 1:length(treatmentTypes)
-                        batIdx = batGroups == t;
-                        avg_birth_date = mean([cData.birthDates{batIdx}]);
-                        analyzed_audio_dir = [cData.baseDirs{t} data_dir_strs{t} filesep];
-                        callFiles = dir([analyzed_audio_dir '*_Call_*.mat']);
-                        if ~isempty(callFiles)
-                            for c = 1:length(callFiles)
-                                cData.treatment{call_k} = treatmentTypes{t};
-                                exp_date_str = regexp(callFiles(c).name,dateRegExp,'match');
-                                exp_date_str = exp_date_str{1}(2:end-1);
-                                cData.expDay(call_k) = datetime(exp_date_str,'inputFormat',cData.dateFormat);
-                                if isdatetime(avg_birth_date)
-                                    cData.daysOld(call_k) = days(cData.expDay(call_k) - avg_birth_date);
+                    for t = 1:length(treatmentGroups)
+                        groupStr = treatmentGroups{t};
+                        batchNumsGroup = find(~structfun(@isempty,batInfo.(groupStr).birthDates))';
+                        batchNumsGroup = batchNumsGroup(ismember(batchNumsGroup,batchNums));
+                        
+                        for b = batchNumsGroup
+                            bStr = ['batch' num2str(b)];
+                            avg_birth_date = mean(batInfo.(groupStr).birthDates.(bStr));
+                            callFiles = dir([batInfo.(groupStr).baseDir  batInfo.(groupStr).treatmentType.(bStr) '*' bStr '*_Call_*.mat']);
+                            if ~isempty(callFiles)
+                                for c = 1:length(callFiles)
+                                    cData.treatment{call_k} = batInfo.(groupStr).treatmentType.(bStr);
+                                    exp_date_str = regexp(callFiles(c).name,dateRegExp,'match');
+                                    exp_date_str = exp_date_str{1}(2:end-1);
+                                    cData.expDay(call_k) = datetime(exp_date_str,'inputFormat',cData.dateFormat);
+                                    if isdatetime(avg_birth_date)
+                                        cData.daysOld(call_k) = days(cData.expDay(call_k) - avg_birth_date);
+                                    end
+                                    cData.fName{call_k} = [batInfo.(groupStr).baseDir callFiles(c).name];
+                                    cData.batchNum(call_k) = b;
+                                    call_k = call_k + 1;
                                 end
-                                cData.fName{call_k} = [analyzed_audio_dir callFiles(c).name];
-                                cData.batchNum(call_k) = str2double(cell2mat(regexp(callFiles(c).name,batchRegExp,'match')));
-                                call_k = call_k + 1;
                             end
                         end
                     end
                     cData.nCalls = call_k-1;
                     
+                    
+                case 'deafened'
+                    maxBatchNums = 5;
+                    batchNums = 1:maxBatchNums;
+                    cData.loadWF = false;
+                    s = load('E:\deafened_recordings\all_deaf_bat_info.mat','all_deaf_bat_info');
+                    batInfo = s.all_deaf_bat_info;
+                    
+                    cData.dateFormat = 'yyyyMMddHHmmss';
+                    dateRegExp = '_\d{8}T';
+                    timeRegExp = 'T\d{6}_';
+                    
+                    [cData.callWF, cData.fName, cData.fName_raw, cData.treatment] = deal(cell(cData.maxCalls,1));
+                    [cData.callLength, cData.daysOld, cData.batchNum] = deal(zeros(cData.maxCalls,1));
+                    cData.expDay = datetime([],[],[]);
+                    cData.callID = [1:cData.maxCalls]';
+                    cData.file_call_pos = zeros(cData.maxCalls,2);
+                    
+                    treatmentGroups = fieldnames(batInfo)';
+                    
+                    if ~isempty(varargin)
+                        varargin = varargin{1};
+                        for subs_k = 1:2:length(varargin)
+                            switch varargin{subs_k}
+                                
+                                case 'treatment'
+                                    treatmentGroups = treatmentGroups(ismember(treatmentGroups,varargin{subs_k+1}));
+                                case 'batchNum'
+                                    batchNums = varargin{subs_k+1};
+                            end
+                            
+                        end
+                    end
+                    
+                    
+                    call_k = 1;
+                    for t = 1:length(treatmentGroups)
+                        groupStr = treatmentGroups{t};
+                        batchNumsGroup = find(~structfun(@isempty,batInfo.(groupStr).birthDates));
+                        batchNumsGroup = batchNumsGroup(ismember(batchNumsGroup,batchNums))';
+                        group_data_baseDir = batInfo.(groupStr).baseDir(1:strfind(batInfo.deaf.baseDir,'all_cut_calls')-1);
+                        
+                        for b = batchNumsGroup
+                            bStr = ['batch' num2str(b)];
+                            avg_birth_date = mean(batInfo.(groupStr).birthDates.(bStr));
+                            callFiles = dir([batInfo.(groupStr).baseDir  batInfo.(groupStr).treatmentType.(bStr) '*' bStr '*_Call_*.mat']);
+                            raw_rec_dir = [group_data_baseDir 'all_raw_recordings\' batInfo.(groupStr).data_dir_str.(bStr) filesep];
+                            if ~isempty(callFiles)
+                                for c = 1:length(callFiles)
+                                    cData.treatment{call_k} = batInfo.(groupStr).treatmentType.(bStr);
+                                    exp_date_str = regexp(callFiles(c).name,dateRegExp,'match');
+                                    time_date_str = regexp(callFiles(c).name,timeRegExp,'match');
+                                    exp_datetime_str = [exp_date_str{1}(2:end-1) time_date_str{1}(2:end-1)];
+                                    cData.expDay(call_k) = datetime(exp_datetime_str,'inputFormat',cData.dateFormat);
+                                    if isdatetime(avg_birth_date)
+                                        cData.daysOld(call_k) = days(cData.expDay(call_k) - avg_birth_date);
+                                    end
+                                    cData.fName{call_k} = [batInfo.(groupStr).baseDir callFiles(c).name];
+                                    cData.fName_raw{call_k} = [raw_rec_dir callFiles(c).name(1:strfind(callFiles(c).name,'_Call_')-1) '.mat'];
+                                    if ~exist(cData.fName{call_k},'file')
+                                        cData.fName{call_k} = [];
+                                    end
+                                    cData.batchNum(call_k) = b;
+                                    s = load(cData.fName{call_k},'callpos');
+                                    cData.file_call_pos(call_k,:) = s.callpos;
+                                    call_k = call_k + 1;
+                                end
+                            end
+                        end
+                    end
+                    cData.nCalls = call_k-1;
+                    cData.expDay = cData.expDay';
                 case 'autoTrain'
                     cData.loadWF = false;
                     cData.baseDirs = 'C:\Users\tobias\Desktop\analysis\bataudio\call groups\all\';
@@ -373,30 +509,49 @@ classdef callData
                         cData.callType{call_k} = s.callType;
                         cData.micType{call_k} = s.micType;
                     end
-                    cData.expDay = cData.expDay';              
+                    cData.expDay = cData.expDay';
                     
                 case 'pratData'
                     cData.loadWF = false;
                     cData.baseDirs = 'E:\Yossi_vocalization_data\';
-                    [fileInfo, batMetadata, batGroupIDs, allFileIDs_struct] = get_fileInfo_and_treatment_fileIDs(cData.baseDirs);
-                    allFileIDs = allFileIDs_struct.con(1:1000);
-                    cData.birthDates = mean([batMetadata.DOB{ismember(batMetadata.ID,batGroupIDs.con)}]);
+                    
+                    [batInfo,batMetadata] = get_yossi_bat_info(cData.baseDirs);
+                    
                     treatmentTypes = {'isolated','control'};
                     
-                    cData.nCalls = length(allFileIDs);
-                    [cData.fName, cData.treatment] = deal(cell(cData.nCalls,1));
-                    [cData.callLength, cData.daysOld] = deal(zeros(cData.nCalls,1));
+                    cData.nCalls = sum(cellfun(@(x) length(vertcat(batInfo.(x)(:).callPos)),treatmentTypes));
+                    [cData.fName, cData.treatment, cData.batNum] = deal(cell(cData.nCalls,1));
+                    [cData.callLength, cData.daysOld, cData.treatmentType] = deal(zeros(cData.nCalls,1));
                     cData.recTime = datetime(zeros(0,3));
+                    cData.batNums = cellfun(@(x) unique({batInfo.(x).batNum}),treatmentTypes,'un',0);
+                    cData.batNums = [cData.batNums{:}];
+                    cData.file_call_pos = zeros(cData.nCalls,2);
                     
-                    for call_k = 1:length(allFileIDs)
-                        cData.isolated(call_k) = ismember(allFileIDs(call_k),allFileIDs_struct.iso);
-                        cData.fName{call_k} = [cData.baseDirs fileInfo.fName{allFileIDs(call_k)}];
-                        cData.recTime(call_k) = fileInfo.recTime(allFileIDs(call_k));
-                        cData.daysOld(call_k) = day(cData.recTime(call_k) - cData.birthDates);
+                    cData.birthDates = datetime(zeros(0,3));
+                    for b = 1:length(cData.batNums)
+                        dob = batMetadata.DOB{batMetadata.ID==str2double(cData.batNums{b})};
+                        cData.birthDates(b) = dob;
+                    end
+                    cData.callID = [1:cData.nCalls]';
+                    call_k = 1;
+                    for t = treatmentTypes
+                        treat = t{1};
+                        for file_k = 1:length(batInfo.(treat))
+                            for file_call_k = 1:size(batInfo.(treat)(file_k).callPos,1)
+                                cData.treatment{call_k} = treat;
+                                cData.fName{call_k} = [cData.baseDirs batInfo.(treat)(file_k).fName];
+                                cData.recTime(call_k) = batInfo.(treat)(file_k).recTime;
+                                cData.batNum{call_k} = batInfo.(treat)(file_k).batNum;
+                                cData.daysOld(call_k) = round(days(batInfo.(treat)(file_k).recTime - cData.birthDates(strcmp(cData.batNums,cData.batNum{call_k}))));
+                                cData.treatmentType(call_k) = batInfo.(treat)(file_k).treatmentType;
+                                cData.file_call_pos(call_k,:) = batInfo.(treat)(file_k).callPos(file_call_k,:);
+                                call_k = call_k + 1;
+                            end
+                        end
                     end
                 otherwise
                     ME = MException('CallData:inputError','Experiment Type not recognized');
-                    throw(ME);                    
+                    throw(ME);
             end
             
             % if we initialized different data structures to have a length
@@ -430,7 +585,11 @@ classdef callData
                                         end
                                         callIdx = callIdx & daysOldIdx;
                                     case 'expDay'
-                                        callIdx = callIdx & (cData.expDay >= S(1).subs{idx+1}(1) & cData.expDay < S(1).subs{idx+1}(2));
+                                        if length(S(1).subs{idx+1}) == 1
+                                            callIdx = callIdx & (cData.expDay == S(1).subs{idx+1});
+                                        else
+                                            callIdx = callIdx & (cData.expDay >= S(1).subs{idx+1}(1) & cData.expDay < S(1).subs{idx+1}(2));
+                                        end
                                     case 'batNum'
                                         batNumIdx = false(cData.nCalls,1);
                                         for b = S(1).subs{idx+1}
@@ -456,6 +615,8 @@ classdef callData
                                             batchNumIdx = batchNumIdx | cData.batchNum == bN;
                                         end
                                         callIdx = callIdx & batchNumIdx;
+                                    case 'callID'
+                                        callIdx = callIdx & ismember(cData.callID,S(1).subs{idx+1});
                                     case 'callNum'
                                         callNumIdx = false(cData.nCalls,1);
                                         for rN = S(1).subs{idx+1}
@@ -486,8 +647,8 @@ classdef callData
                                         for sI = S(1).subs{idx+1}
                                             sessionIDIdx = sessionIDIdx | cData.sessionID==sI;
                                         end
-                                        callIdx = callIdx & sessionIDIdx;                                        
-%                                        callIdx = callIdx & cellfun(@(x) ~isempty(strfind(x,S(1).subs{idx+1})),cData.sessionID);
+                                        callIdx = callIdx & sessionIDIdx;
+                                        %                                        callIdx = callIdx & cellfun(@(x) ~isempty(strfind(x,S(1).subs{idx+1})),cData.sessionID);
                                     case 'callLength'
                                         callLengthIdx = false(cData.nCalls,1);
                                         for cL = S(1).subs{idx+1}
@@ -570,6 +731,43 @@ classdef callData
             
             
         end
+        function [interCallInterval, interDayIdx] = getICI(cData)
+            cPos = cData.callPos;
+            interCallInterval = [0; cPos(2:end,1) - cPos(1:end-1,2)]; % ICI(k) = time between call(k) and previous call
+            interDayIdx = abs(diff([cData.expDay(1); cData.expDay]))>duration(1,0,0) | interCallInterval<0;
+        end
+        function [boutDuration, boutICI] = get_bout_duration(cData)
+            boutSeparation = 1;
+            
+            cLength = cData.callLength;
+            
+            [interCallInterval, interDayIdx] = getICI(cData);
+            interBoutIdx = [find(interCallInterval>boutSeparation); length(interCallInterval)];
+            
+            boutDuration = zeros(1,length(interBoutIdx)-1);
+            boutICI = cell(1,length(interBoutIdx)-1);
+            
+            for bout_k = 1:length(interBoutIdx)-1
+                last_call_in_bout = interBoutIdx(bout_k+1)-1;
+                calls_in_bout = interBoutIdx(bout_k)+1:last_call_in_bout;
+                if length(calls_in_bout) > 2
+                    if any(interDayIdx(calls_in_bout))
+                        last_call_in_bout = calls_in_bout(find(interDayIdx(calls_in_bout),1,'first'))-1;
+                    end
+                    calls_in_bout = interBoutIdx(bout_k)+1:last_call_in_bout;
+                    boutDuration(bout_k) = sum(cLength(calls_in_bout)) + sum(interCallInterval(calls_in_bout));
+                    boutICI{bout_k} = interCallInterval(calls_in_bout);
+                    if boutDuration(bout_k) < 0
+                        keyboard
+                    end
+                else
+                    boutDuration(bout_k) = NaN;
+                end
+                
+            end
+            boutICI = vertcat(boutICI{:});
+            boutDuration = boutDuration(boutDuration~=0 & ~isnan(boutDuration));
+        end
         function oldestAge = get.oldestAge(obj)
             oldestAge = max(obj.daysOld);
         end
@@ -595,11 +793,11 @@ classdef callData
             specFreqs = linspace(freqRange(1),freqRange(2),nfft);
             spectrogram(data,specWin,cData.fs*cData.overlap,specFreqs,cData.fs,'yaxis');
             if ~isempty(varargin)
-               if strcmp(varargin{1},'yinF0')
-                   
-               else
-                   
-               end
+                if strcmp(varargin{1},'yinF0')
+                    
+                else
+                    
+                end
             end
             
         end
@@ -610,7 +808,8 @@ function callWF = loadCallWF_onTheFly(cData,call_k)
 
 switch cData.expType
     case 'pratData'
-        callWF = audioread([cData.baseDirs cData.fName{call_k}]);
+        callWF = audioread(cData.fName{call_k});
+        callWF = callWF(cData.file_call_pos(call_k,1):cData.file_call_pos(call_k,2));
     case 'autoTrain'
         if ~isempty(cData.fName{call_k})
             callWF = load([cData.baseDirs cData.fName{call_k}]);
@@ -623,6 +822,11 @@ switch cData.expType
         catch
             callWF = callWF.finalcut;
         end
+        callWF = reshape(callWF,numel(callWF),1);
+        
+    case 'lesion'
+        callWF = load(cData.fName{call_k});
+        callWF = callWF.cut;
         callWF = reshape(callWF,numel(callWF),1);
     otherwise
         display('No functionality to load callWF for the experiment type');
@@ -719,7 +923,7 @@ function [f0] = spPitchCorr(r, fs, mxf, mnf)
 % DESCRIPTION
 %   Estimate pitch frequencies via Cepstral method
 % INPUTS
-%   r        (vector) of size (maxlag*2+1)x1 which contains Corr coefficients. 
+%   r        (vector) of size (maxlag*2+1)x1 which contains Corr coefficients.
 %             Use spCorr.m
 %   fs       (scalar) the sampling frequency of the original signal
 % OUTPUTS
@@ -729,13 +933,13 @@ function [f0] = spPitchCorr(r, fs, mxf, mnf)
 % SEE ALSO
 %   spCorr.m
 % search for maximum  between 2ms (=500Hz) and 20ms (=50Hz)
- %adjusted parameters are 4000 Hz and 500 Hz
- ms2=floor(fs/mxf); % 2ms
- ms20=floor(fs/mnf); % 20ms
- % half is just mirror for real signal
- r = r(floor(length(r)/2):end);
- [maxi,idx]=max(r(ms2:ms20));
- f0 = fs/(ms2+idx-1);
+%adjusted parameters are 4000 Hz and 500 Hz
+ms2=floor(fs/mxf); % 2ms
+ms20=floor(fs/mnf); % 20ms
+% half is just mirror for real signal
+r = r(floor(length(r)/2):end);
+[maxi,idx]=max(r(ms2:ms20));
+f0 = fs/(ms2+idx-1);
 end
 function [weinerEntropy, spectralEntropy, centroid, energyEntropy, RMS,...
     pitchGoodness, cepstralF0, spCorrF0Win] = getCallFeatures(callWF,P)
@@ -755,7 +959,7 @@ if nFrame > 0
             energyEntropy(fr), RMS(fr), pitchGoodness(fr), cepstralF0(fr),...
             spCorrF0Win(fr)] = getFeatures(frame,P);
     end
-else 
+else
     [weinerEntropy, spectralEntropy, centroid, energyEntropy, RMS,...
         pitchGoodness, cepstralF0, spCorrF0Win] = deal(NaN);
 end
