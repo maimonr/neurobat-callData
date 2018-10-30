@@ -32,6 +32,7 @@ classdef callData
         xrun %dropped sample number
         callID %unique ID for each call
         callEcho % flag to load either calls or echolocations
+        loggerNum % audio logger serial number
         
         fs % sampling rate
         expType % String indicating which experiment we are dealing with
@@ -41,8 +42,8 @@ classdef callData
         recTime % time of recording (in datetime format)
         daysOld % number of days from birth for this call
         batNum % bat ID number correspoding to this call
-        fName % file path to call file
-        fName_raw % file path to file from which call was cut
+        fName % file path to file from which call was cut
+        fName_cut % file path to file with cut call
         nCalls % total number of calls
         callLength % length of call
         file_call_pos % % (for 'ephys') position in samples during session
@@ -410,7 +411,7 @@ classdef callData
                     dateRegExp = '_\d{8}T';
                     timeRegExp = 'T\d{6}_';
                     
-                    [cData.callWF, cData.fName, cData.fName_raw, cData.treatment] = deal(cell(cData.maxCalls,1));
+                    [cData.callWF, cData.fName, cData.fName_cut, cData.treatment] = deal(cell(cData.maxCalls,1));
                     [cData.callLength, cData.daysOld, cData.batchNum] = deal(zeros(cData.maxCalls,1));
                     cData.expDay = datetime([],[],[]);
                     cData.callID = [1:cData.maxCalls]';
@@ -455,8 +456,8 @@ classdef callData
                                     if isdatetime(avg_birth_date)
                                         cData.daysOld(call_k) = days(cData.expDay(call_k) - avg_birth_date);
                                     end
-                                    cData.fName{call_k} = [batInfo.(groupStr).baseDir callFiles(c).name];
-                                    cData.fName_raw{call_k} = [raw_rec_dir callFiles(c).name(1:strfind(callFiles(c).name,'_Call_')-1) '.mat'];
+                                    cData.fName_cut{call_k} = [batInfo.(groupStr).baseDir callFiles(c).name];
+                                    cData.fName{call_k} = [raw_rec_dir callFiles(c).name(1:strfind(callFiles(c).name,'_Call_')-1) '.mat'];
                                     if ~exist(cData.fName{call_k},'file')
                                         cData.fName{call_k} = [];
                                     end
@@ -521,7 +522,7 @@ classdef callData
                     
                     cData.nCalls = sum(cellfun(@(x) length(vertcat(batInfo.(x)(:).callPos)),treatmentTypes));
                     [cData.fName, cData.treatment, cData.batNum] = deal(cell(cData.nCalls,1));
-                    [cData.callLength, cData.daysOld, cData.treatmentType] = deal(zeros(cData.nCalls,1));
+                    [cData.callLength, cData.daysOld, cData.treatment] = deal(zeros(cData.nCalls,1));
                     cData.recTime = datetime(zeros(0,3));
                     cData.batNums = cellfun(@(x) unique({batInfo.(x).batNum}),treatmentTypes,'un',0);
                     cData.batNums = [cData.batNums{:}];
@@ -549,6 +550,102 @@ classdef callData
                             end
                         end
                     end
+                    
+                case 'piezo_recording'
+                    
+                    cData.loadWF = false;
+                    dataDir = 'C:\Users\phyllo\Documents\Maimon\acoustic_recording\';
+                    audio_base_dir = 'Z:\users\Maimon\acoustic_recording\audio\';
+                    recordingLogs = readtable([dataDir 'recording_logs.csv']);
+                    recordingLogs = recordingLogs(logical(recordingLogs.usable),:);
+                    treatmentGroups = readtable([dataDir 'bat_info.csv']);
+                    bat_ID_table_idx = contains(recordingLogs.Properties.VariableNames,'Bat_');
+                    nExp = size(recordingLogs,1);
+
+                    cData.batNums = cellfun(@num2str,num2cell(treatmentGroups.BatNum),'un',0);
+                    
+                    cData.nBats = length(cData.batNums);
+                    cData.birthDates = cell(1,cData.nBats);
+                    
+                    for b = 1:cData.nBats
+                        dob = treatmentGroups.DOB(b);
+                        cData.birthDates{b} = dob;
+                    end
+                    
+                    [cData.callWF, cData.batNum, cData.treatment, cData.fName, cData.fName_cut] = deal(cell(cData.maxCalls,1));
+                    [cData.loggerNum, cData.callLength, cData.daysOld] = deal(zeros(cData.maxCalls,1));
+                    cData.callPos = zeros(cData.maxCalls,2);
+                    cData.file_call_pos = zeros(cData.maxCalls,2);
+                    cData.expDay = datetime([],[],[]);
+                    
+                    date_str_format = 'mmddyyyy';
+                    cutFName = 'cut_call_data.mat';
+                    analysis_dir_name = 'Analyzed_auto';
+                    
+                    call_k = 1;
+                    
+                    for d = 1:nExp % iterate across all recording days
+                        expDate = recordingLogs.Date(d);
+                        exp_day_bat_nums = recordingLogs{d,bat_ID_table_idx};
+                        exp_day_logger_nums = recordingLogs{d,find(bat_ID_table_idx)+1};
+                        logger_bat_ID_idx = ~isnan(exp_day_bat_nums) & ~isnan(exp_day_logger_nums) & ~ismember(exp_day_logger_nums,str2double(recordingLogs.malfunction_loggers{1}));
+                        
+                        exp_day_logger_nums = exp_day_logger_nums(logger_bat_ID_idx);
+                        exp_day_bat_nums = exp_day_bat_nums(logger_bat_ID_idx);
+                        
+                        dateStr = datestr(expDate,date_str_format);
+                        audioDir = fullfile(audio_base_dir,dateStr,'audio\ch1\');
+                        
+                        cut_call_data = load(fullfile(audioDir,cutFName));
+                        cut_call_data = cut_call_data.cut_call_data;
+                        all_cut_call_files = dir(fullfile(audioDir,analysis_dir_name,'*Call*.mat'));
+                        
+                        assert(length(all_cut_call_files) == length(cut_call_data));
+                        
+                        AL_info = load(fullfile(audioDir,'AL_class_info.mat'));
+                        
+                        cut_call_data = cut_call_data(AL_info.usableIdx);
+                        all_cut_call_files = all_cut_call_files(AL_info.usableIdx);
+
+                        loggerID = predict_AL_identity(AL_info);
+                        identifiable_call_idx = cellfun(@length,loggerID) == 1;
+                        
+                        cut_call_data = cut_call_data(identifiable_call_idx);
+                        loggerID = loggerID(identifiable_call_idx);
+                        all_cut_call_files = all_cut_call_files(identifiable_call_idx);
+                        
+                        loggerID = [loggerID{:}];
+                        loggerID = AL_info.logger_nums(loggerID);
+                        
+                         if isempty(cut_call_data)
+                            continue
+                        end
+                        
+                        call_pos_expDay = vertcat(cut_call_data.corrected_callpos)/1e3; % convert to seconds
+                        file_call_pos_expDay = vertcat(cut_call_data.callpos);
+                        call_length_expDay = arrayfun(@(x) length(x.cut)/cData.fs,cut_call_data);
+                        
+                        for c = 1:length(cut_call_data)
+                            cData.callLength(call_k) = call_length_expDay(c);
+                            cData.callPos(call_k,:) = call_pos_expDay(c,:);
+                            cData.file_call_pos(call_k,:) = file_call_pos_expDay(c,:);
+                            cData.expDay(call_k,1) = expDate;
+                            cData.batNum{call_k} = num2str(exp_day_bat_nums(exp_day_logger_nums == loggerID(c)));
+                            cData.loggerNum(call_k) = loggerID(c);
+                            cData.fName{call_k} = cut_call_data(c).fName;
+                            cData.fName_cut{call_k} = fullfile(all_cut_call_files(c).folder,all_cut_call_files(c).name);
+                            cData.callID(call_k) = cut_call_data(c).uniqueID;
+                            
+                            b = strcmp(cData.batNums,cData.batNum{call_k});
+                            cData.daysOld(call_k) = days(expDate - cData.birthDates{b});
+                            cData.treatment{call_k} = treatmentGroups.Treatment{b};
+                            
+                            call_k = call_k + 1;
+                        end
+                    end
+                    cData.nCalls = call_k-1;
+                    
+                    
                 otherwise
                     ME = MException('CallData:inputError','Experiment Type not recognized');
                     throw(ME);
@@ -565,6 +662,8 @@ classdef callData
                     cData.(prop{:}) = cData.(prop{:})(1:cData.nCalls,:);
                 end
             end
+            
+            cData.callID = reshape(cData.callID,[1 cData.nCalls]);
             
         end
         function varargout = subsref(cData,S)
@@ -828,6 +927,11 @@ switch cData.expType
         callWF = load(cData.fName{call_k});
         callWF = callWF.cut;
         callWF = reshape(callWF,numel(callWF),1);
+    case 'piezo_recording'
+        callWF = load(cData.fName_cut{call_k});
+        callWF = callWF.cut;
+        callWF = reshape(callWF,numel(callWF),1);        
+        
     otherwise
         display('No functionality to load callWF for the experiment type');
         keyboard;
