@@ -33,6 +33,7 @@ classdef callData
         callID %unique ID for each call
         callEcho % flag to load either calls or echolocations
         loggerNum % audio logger serial number
+        manual_call_class % variable to store potenial manual classification
         
         fs % sampling rate
         expType % String indicating which experiment we are dealing with
@@ -880,22 +881,129 @@ classdef callData
                 callWF = loadCallWF_onTheFly(cData,call_k);
             end
         end
-        function plotSpectrogram(cData,call_k,varargin)
-            if cData.loadWF
-                data = cData.callWF{call_k};
+        function plotSpectrogram(cData,axisHandle,specParams,callInfo)
+            
+            if length(callInfo) == 1
+                if cData.loadWF
+                    data = cData.callWF{callInfo};
+                else
+                    data = loadCallWF_onTheFly(cData,callInfo);
+                end
             else
-                data = loadCallWF_onTheFly(cData,call_k);
+                data = callInfo;
             end
+            
             specWin = kaiser(cData.fs*cData.windowLength,0.5);
             nfft = 256;
             freqRange = [0 40e3];
             specFreqs = linspace(freqRange(1),freqRange(2),nfft);
             spectrogram(data,specWin,cData.fs*cData.overlap,specFreqs,cData.fs,'yaxis');
+            
+            addpath('C:\Users\phyllo\Documents\GitHub\SoundAnalysisBats\')
+            if ~isfield(specParams,'spec_caxis_factor')
+                specParams.spec_caxis_factor = 0.75;
+            end
+            
+            if length(data) <= specParams.spec_win_size
+                return
+            end
+            
+            [~,f,t,ps] = spectrogram(data,gausswin(specParams.spec_win_size),specParams.spec_overlap_size,specParams.spec_nfft,specParams.fs,'yaxis');
+            if length(t) <= 1
+                return
+            end
+            f = f*1e-3; % frequency in kHz
+            t = t*1e3;
+            t = [0 t(end-1)];
+            ps = 10*log10(ps);
+            ps(isinf(ps)) = NaN;
+            imagesc(axisHandle,t,f,ps)
+            cmap = spec_cmap();
+            colormap(cmap);
+            ylim(specParams.spec_ylims);
+            caxis([min(ps(:))*specParams.spec_caxis_factor max(ps(:))]);
+            set(axisHandle,'YDir','normal')
+            
+        end
+        function cData = manual_classify_call_type(cData,varargin)
+            
+            orig_rec_plot_win = 5;
+            specParams = struct('spec_win_size',512,'spec_overlap_size',500,'spec_nfft',1024,'fs',cData.fs,'spec_ylims',[0 60],'spec_caxis_factor',0.75);
+            if isempty(cData.manual_call_class)
+                cData.manual_call_class = cell(1,cData.nCalls);
+            end
+            
             if ~isempty(varargin)
-                if strcmp(varargin{1},'yinF0')
-                    
-                else
-                    
+                start_call_k = varargin{1};
+            else
+                start_call_k = find(cellfun(@isempty,cData.manual_call_class),1,'first');
+            end
+            
+            last_orig_wav_data = '';
+            
+            for call_k = start_call_k:cData.nCalls
+                data = getCallWF(cData,call_k);
+                playback_fs = min(cData.fs,200e3);
+                sound(data,playback_fs);
+                
+                origRec_fName = cData.fName{call_k};
+                load_orig_wav_data = ~strcmp(origRec_fName,last_orig_wav_data);
+                
+                if load_orig_wav_data
+                    dataFull = audioread(origRec_fName);
+                    last_orig_wav_data = origRec_fName;
+                end
+                
+                subplot(2,1,1)
+                cla
+                plotSpectrogram(cData,gca,specParams,data)
+                subplot(2,1,2);
+                hold on
+                if load_orig_wav_data
+                    cla
+                    plot((1:length(dataFull))/cData.fs,dataFull,'k');
+                end
+                plot((cData.file_call_pos(call_k,1)+(0:length(data)-1))/cData.fs,data);
+                
+                if length(dataFull)/cData.fs > orig_rec_plot_win
+                    xlim([cData.file_call_pos(call_k,1)/cData.fs - orig_rec_plot_win/2 cData.file_call_pos(call_k,1)/cData.fs + orig_rec_plot_win/2])
+                end
+                
+                display([datestr(cData.expDay(1)) ' Call ' num2str(call_k)]);
+                
+                repeat = 1;
+                repeat_k = 1;
+                while repeat
+                    class = input('Call type?','s');
+                    if isempty(class)
+                        pause(0.1);
+                        if repeat_k < 3
+                            sound(data,playback_fs/(2*repeat_k));
+                        else
+                            startIdx = max(1,cData.file_call_pos(call_k,1) - (orig_rec_plot_win/2)*cData.fs);
+                            endIdx = min(length(dataFull),cData.file_call_pos(call_k,1) + (orig_rec_plot_win/2)*cData.fs);
+                            sound(dataFull(startIdx:endIdx),playback_fs);
+                            repeat_k = 1;
+                        end
+                        repeat_k = repeat_k + 1;
+                        
+                    else
+                        
+                        if strcmp(class,'m')
+                            cData.manual_call_class{call_k} = 'mating';
+                            repeat = 0;
+                        elseif strcmp(class,'t')
+                            cData.manual_call_class{call_k} = 'trill';
+                            repeat = 0;
+                        elseif strcmp(class,'o')
+                            cData.manual_call_class{call_k} = 'other';
+                            repeat = 0;
+                        elseif strcmp(class,'stop')
+                            return
+                        elseif strcmp(class,'pause')
+                            keyboard
+                        end
+                    end
                 end
             end
             
