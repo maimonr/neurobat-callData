@@ -608,17 +608,19 @@ classdef callData
                         cut_call_data = cut_call_data(AL_info.usableIdx);
                         all_cut_call_files = all_cut_call_files(AL_info.usableIdx);
 
-                        loggerID = predict_AL_identity(AL_info);
-                        identifiable_call_idx = cellfun(@length,loggerID) == 1;
+                        predicted_loggerID = predict_AL_identity(AL_info);
+                        noise_idx = cellfun(@length,predicted_loggerID) == 0;
                         
-                        cut_call_data = cut_call_data(identifiable_call_idx);
-                        loggerID = loggerID(identifiable_call_idx);
-                        all_cut_call_files = all_cut_call_files(identifiable_call_idx);
+                        cut_call_data = cut_call_data(~noise_idx);
+                        predicted_loggerID = predicted_loggerID(~noise_idx);
+                        all_cut_call_files = all_cut_call_files(~noise_idx);
                         
-                        loggerID = [loggerID{:}];
-                        loggerID = AL_info.logger_nums(loggerID);
+                        identifiable_call_idx = cellfun(@length,predicted_loggerID) == 1;
+                        usable_loggerID = [predicted_loggerID{identifiable_call_idx}];
+                        loggerID = nan(1,sum(~noise_idx));
+                        loggerID(identifiable_call_idx) = AL_info.logger_nums(usable_loggerID);
                         
-                         if isempty(cut_call_data)
+                        if isempty(cut_call_data)
                             continue
                         end
                         
@@ -637,10 +639,14 @@ classdef callData
                             cData.fName_cut{call_k} = fullfile(all_cut_call_files(c).folder,all_cut_call_files(c).name);
                             cData.callID(call_k) = cut_call_data(c).uniqueID;
                             
-                            b = strcmp(cData.batNums,cData.batNum{call_k});
-                            cData.daysOld(call_k) = days(expDate - cData.birthDates{b});
-                            cData.treatment{call_k} = treatmentGroups.Treatment{b};
-                            
+                            if ~isempty(cData.batNum{call_k})
+                                b = strcmp(cData.batNums,cData.batNum{call_k});
+                                cData.daysOld(call_k) = days(expDate - cData.birthDates{b});
+                                cData.treatment{call_k} = treatmentGroups.Treatment{b};
+                            else
+                                cData.batNum{call_k} = 'multiple_bats_detected';
+                                cData.treatment{call_k} = 'multiple_bats_detected';
+                            end
                             call_k = call_k + 1;
                         end
                     end
@@ -926,7 +932,8 @@ classdef callData
             
         end
         function cData = manual_classify_call_type(cData,varargin)
-            
+            randomizeFlag = false;
+            overWriteFlag = true;
             orig_rec_plot_win = 5;
             specParams = struct('spec_win_size',512,'spec_overlap_size',500,'spec_nfft',1024,'fs',cData.fs,'spec_ylims',[0 60],'spec_caxis_factor',0.75);
             if isempty(cData.manual_call_class)
@@ -936,12 +943,21 @@ classdef callData
             if ~isempty(varargin)
                 start_call_k = varargin{1};
             else
-                start_call_k = find(cellfun(@isempty,cData.manual_call_class),1,'first');
+                start_call_k = 1;
             end
             
             last_orig_wav_data = '';
+            call_idx = start_call_k:cData.nCalls;
             
-            for call_k = start_call_k:cData.nCalls
+            if ~overWriteFlag
+                call_idx = setdiff(call_idx,find(~cellfun(@isempty,cData.manual_call_class)));
+            end
+            
+            if randomizeFlag
+                call_idx = call_idx(randperm(length(call_idx)));
+            end
+            
+            for call_k = call_idx
                 data = getCallWF(cData,call_k);
                 playback_fs = min(cData.fs,200e3);
                 sound(data,playback_fs);
@@ -969,7 +985,7 @@ classdef callData
                     xlim([cData.file_call_pos(call_k,1)/cData.fs - orig_rec_plot_win/2 cData.file_call_pos(call_k,1)/cData.fs + orig_rec_plot_win/2])
                 end
                 
-                display([datestr(cData.expDay(1)) ' Call ' num2str(call_k)]);
+                display([datestr(cData.expDay(call_k)) ' Call ' num2str(call_k)]);
                 
                 repeat = 1;
                 repeat_k = 1;
@@ -988,8 +1004,10 @@ classdef callData
                         repeat_k = repeat_k + 1;
                         
                     else
-                        
-                        if strcmp(class,'m')
+                        if strcmp(class,'n')
+                            cData.manual_call_class{call_k} = 'noise';
+                            repeat = 0;
+                        elseif strcmp(class,'m')
                             cData.manual_call_class{call_k} = 'mating';
                             repeat = 0;
                         elseif strcmp(class,'t')
@@ -997,6 +1015,9 @@ classdef callData
                             repeat = 0;
                         elseif strcmp(class,'o')
                             cData.manual_call_class{call_k} = 'other';
+                            repeat = 0;
+                        elseif strcmp(class,'i')
+                            cData.manual_call_class{call_k} = 'interesting';
                             repeat = 0;
                         elseif strcmp(class,'stop')
                             return
