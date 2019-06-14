@@ -115,6 +115,7 @@ classdef callData
             
             % iterate through all calls
             lastProgress = 0;
+            addpath('C:\Users\phyllo\Documents\MATLAB\yin\')
             for call_k = 1:cData.nCalls
                 
                 if cData.loadWF % if we already loaded all the data into this object
@@ -135,7 +136,6 @@ classdef callData
                     'bufsize',nSamples+2,'APthresh',2.5,...
                     'maxf0',cData.maxF0,'minf0',cData.minF0);
                 
-                addpath('C:\Users\phyllo\Documents\MATLAB\yin\')
                 [f0, ap0] = calculate_yin_F0(callWF,yinParams,cData.yinF0_interp);
                 cData.yinF0Win{call_k} = f0;
                 cData.ap0Win{call_k} = ap0;
@@ -203,13 +203,9 @@ classdef callData
             switch cData.expType
                 case 'ephys' % Maimon's juvenile ephys experiments or Wujie's adult ephys experiments
                     
-                    if ~isempty(varargin)
-                        juv_adult = varargin{1};
-                    else
-                        juv_adult = 'juvenile';
-                    end
+                    ephys_exp_type = varargin{1};
                     
-                    eData = ephysData(juv_adult);
+                    eData = ephysData(ephys_exp_type);
                     
                     cData.baseDirs = eData.baseDirs;
                     cData.batNums = eData.batNums;
@@ -222,120 +218,49 @@ classdef callData
                     cData.callPos = zeros(cData.maxCalls,2);
                     cData.file_call_pos = zeros(cData.maxCalls,2);
                     cData.expDay = datetime([],[],[]);
-                    nlg_rec_str = 'neurologger_recording';
                     
                     if isempty(cData.callEcho)
                         cData.callEcho = input('Call or Echo?','s');
                     end
-                    if strcmp(cData.callEcho,'call')
-                        cutFName = 'cut_call_data.mat';
-                    elseif strcmp(cData.callEcho,'echo')
-                        cutFName = 'cut_echo_data.mat';
-                    end
                     
                     call_k = 1;
-                    for b = 1:cData.nBats % iterate across all experimental bats
-                        switch juv_adult
-                            case 'juvenile'
-                                call_info_str = 'juv_call_info';
-                                nlg_dir_str = [cData.baseDirs{b} 'bat' cData.batNums{b} filesep '*neurologger*'];
-                            case 'adult'
-                                call_info_str = 'call_info';
-                                nlg_dir_str = [cData.baseDirs{b} '*neurologger*'];
-                        end
-                        
-                        nlgDirs = dir(nlg_dir_str);
-                        for d = 1:length(nlgDirs) % iterate across all recording days
-                            audioDir = [fullfile(nlgDirs(d).folder,nlgDirs(d).name) filesep 'audio\ch1\'];
+
+                    all_cut_call_data = get_cut_call_data(cData,ephys_exp_type);
+                    
+                    for k = 1:length(all_cut_call_data)
+                        cut_call_data = all_cut_call_data{k};
+                        if ~isempty({cut_call_data.fName})
                             
-                            if strcmp(cData.callEcho,'echo')
-                                call_info_fName = [audioDir call_info_str '_' cData.batNums{b} '_echo.mat'];
-                                if ~exist(call_info_fName,'file')
-                                    continue
-                                end
-                                
-                                s = load(call_info_fName);
-                                call_info = s.call_info;
-                                
-                                s = load([audioDir cutFName]);
-                                cut_call_data = s.cut_call_data;
-                                cut_call_data = cut_call_data(~[cut_call_data.noise]);
-                                
-                                assert(all([cut_call_data.uniqueID] == [call_info.callID]));
-                                
-                                echo_calls = arrayfun(@(x) strcmp(x.echoCall,'juvEcho'),call_info);
-                                cut_call_data = cut_call_data(echo_calls);
-                            else
-                                % get call data and time in recording
-                                % (corrected for clock drift)
-                                s = load([audioDir cutFName]);
-                                cut_call_data = s.cut_call_data;
-                                if isempty(cut_call_data)
-                                   continue 
-                                end
-                                if strcmp(juv_adult,'adult')
-                                    
-                                    exp_day_idx = strfind(nlgDirs(d).name,nlg_rec_str) + length(nlg_rec_str);
-                                    expDate = nlgDirs(d).name(exp_day_idx:exp_day_idx+length(cData.dateFormat)-1);
-                                    
-                                    call_info_fname = dir([audioDir 'call_info_' cData.batNums{b} '_' cData.callEcho '_' expDate '.mat']);
-                                    
-                                    if isempty(call_info_fname)
-                                       continue 
-                                    end
-                                    
-                                    if length(call_info_fname) > 1
-                                        keyboard
-                                    end
-                                    s = load(fullfile(call_info_fname.folder,call_info_fname.name));
-                                    call_info = s.call_info;
-                                    
-                                    cut_call_data = cut_call_data(~[cut_call_data.noise]);
-                                    
-                                    batIdx = unique(cellfun(@(call) find(cellfun(@(bNum) strcmp(bNum,cData.batNums{b}),call)),{cut_call_data.batNum}));
-                                    
-                                    if length(batIdx) == 1
-                                        callpos = horzcat(cut_call_data.corrected_callpos);
-                                        callpos = callpos(batIdx,:);
-                                        [cut_call_data.corrected_callpos] = deal(callpos{:});
-                                    else
-                                        keyboard
-                                    end
-                                    
-                                    assert(all([cut_call_data.uniqueID] == [call_info.callID]));
-                                    
-                                    bat_calls = cellfun(@(x) ischar(x{1}) && contains(x,cData.batNums{b}),{call_info.behaviors});
-                                    cut_call_data = cut_call_data(bat_calls);
-                                    
-                                end
-                            end
+                            cutCalls = {cut_call_data.cut};
+                            call_pos_expDay = vertcat(cut_call_data.corrected_callpos)/1e3; % convert to seconds
+                            file_call_pos_expDay = vertcat(cut_call_data.callpos);
+                            call_length_expDay = cellfun(@length, cutCalls)/cData.fs;
                             
-                            if ~isempty([cut_call_data.f_num])
-                                
-                                cutCalls = {cut_call_data.cut};
-                                call_pos_expDay = vertcat(cut_call_data.corrected_callpos)/1e3; % convert to seconds
-                                file_call_pos_expDay = vertcat(cut_call_data.callpos);
-                                call_length_expDay = cellfun(@length, cutCalls)/cData.fs;
-                                exp_day_idx = strfind(nlgDirs(d).name,nlg_rec_str) + length(nlg_rec_str);
-                                expDatetime = datetime(nlgDirs(d).name(exp_day_idx:exp_day_idx+length(cData.dateFormat)-1),'InputFormat',cData.dateFormat);
-                                
-                                for c = 1:length(cutCalls)
-                                    if ~cut_call_data(c).noise && ~any(isnan(cut_call_data(c).corrected_callpos))
-                                        cData.callWF{call_k} = cutCalls{c};
-                                        cData.callLength(call_k) = call_length_expDay(c);
-                                        cData.callPos(call_k,:) = call_pos_expDay(c,:);
-                                        cData.file_call_pos(call_k,:) = file_call_pos_expDay(c,:);
-                                        cData.expDay(call_k,1) = expDatetime;
-                                        cData.batNum{call_k} = cData.batNums{b};
+                            assert(all(isdatetime([cut_call_data.expDay])) && length(unique([cut_call_data.expDay])) == 1)
+                            expDatetime = cut_call_data(1).expDay;
+                            
+                            for c = 1:length(cutCalls)
+                                if ~cut_call_data(c).noise && ~any(isnan(cut_call_data(c).corrected_callpos))
+                                    cData.callWF{call_k} = cutCalls{c};
+                                    cData.callLength(call_k) = call_length_expDay(c);
+                                    cData.callPos(call_k,:) = call_pos_expDay(c,:);
+                                    cData.file_call_pos(call_k,:) = file_call_pos_expDay(c,:);
+                                    cData.expDay(call_k,1) = expDatetime;
+                                    cData.batNum{call_k} = cut_call_data(c).batNum;
+                                    b = strcmp(cData.batNums,cData.batNum{call_k});
+                                    if any(b)
                                         cData.daysOld(call_k) = days(expDatetime - cData.birthDates{b});
-                                        cData.fName{call_k} = cut_call_data(c).fName;
-                                        cData.callID(call_k) = cut_call_data(c).uniqueID;
-                                        call_k = call_k + 1;
+                                    else
+                                        cData.daysOld(call_k) = NaN;
                                     end
+                                    cData.fName{call_k} = cut_call_data(c).fName;
+                                    cData.callID(call_k) = cut_call_data(c).uniqueID;
+                                    call_k = call_k + 1;
                                 end
                             end
                         end
                     end
+
                     cData.nCalls = call_k-1;
                     
                     
@@ -777,7 +702,7 @@ classdef callData
                             end
                             if iscell(cData.(S(2).subs)(callIdx)) && ~any(cellfun(@ischar,cData.(S(2).subs)(callIdx)))
                                 try
-                                    varargout = {vertcat(cData.(S(2).subs){callIdx})};
+                                    varargout = {vertcat(cData.(S(2).subs)(callIdx))};
                                 catch
                                     try
                                         varargout = {[cData.(S(2).subs){callIdx}]};
@@ -963,6 +888,9 @@ classdef callData
                 sound(data,playback_fs);
                 
                 origRec_fName = cData.fName{call_k};
+                if iscell(origRec_fName)
+                    origRec_fName = origRec_fName{1};
+                end
                 load_orig_wav_data = ~strcmp(origRec_fName,last_orig_wav_data);
                 
                 if load_orig_wav_data
@@ -1004,7 +932,13 @@ classdef callData
                         repeat_k = repeat_k + 1;
                         
                     else
-                        if strcmp(class,'n')
+                        if strcmp(class,'l')
+                            cData.manual_call_class{call_k} = 'loud';
+                            repeat = 0;
+                        elseif strcmp(class,'c')
+                            cData.manual_call_class{call_k} = 'connector';
+                            repeat = 0;
+                        elseif strcmp(class,'n')
                             cData.manual_call_class{call_k} = 'noise';
                             repeat = 0;
                         elseif strcmp(class,'m')
@@ -1015,6 +949,9 @@ classdef callData
                             repeat = 0;
                         elseif strcmp(class,'o')
                             cData.manual_call_class{call_k} = 'other';
+                            repeat = 0;
+                        elseif strcmp(class,'g')
+                            cData.manual_call_class{call_k} = 'grumble';
                             repeat = 0;
                         elseif strcmp(class,'i')
                             cData.manual_call_class{call_k} = 'interesting';
@@ -1030,6 +967,65 @@ classdef callData
             
         end
     end
+end
+
+function all_cut_call_data = get_cut_call_data(cData,ephys_exp_type)
+
+
+switch ephys_exp_type
+    
+    case 'adult'
+        cut_call_fnames = dir(fullfile(cData.baseDirs{1},'call_data',['*cut_' cData.callEcho '_data.mat']));      
+        
+    case 'juvenile'
+        cut_call_fnames = cell(1,cData.nBats);
+        for b = 1:cData.nBats
+            cut_call_fnames{b} = dir(fullfile(cData.baseDirs{b},['bat' cData.batNums{b}],'**',['*cut_' cData.callEcho '_data.mat']));
+        end
+        cut_call_fnames = vertcat(cut_call_fnames{:});
+        
+end
+
+all_cut_call_data = cell(1,length(cut_call_fnames));
+
+for d = 1:length(cut_call_fnames) % iterate across all recording days
+    
+    s = load(fullfile(cut_call_fnames(d).folder,cut_call_fnames(d).name));
+    cut_call_data = s.cut_call_data;
+    
+    if strcmp(cData.callEcho,'call')
+        if all(islogical([cut_call_data.noise]))
+            cut_call_data = cut_call_data(~[cut_call_data.noise]);
+        else
+            disp('non-logical values found in noise field of cut_call_data');
+            keyboard;
+        end
+    elseif strcmp(cData.callEcho,'echo')
+        [cut_call_data.noise] = deal(false);
+    end
+
+    
+    if strcmp(cData.callEcho,'echo') && strcmp(ephys_exp_type,'juvenile')
+        call_info_fName = dir(fullfile(cut_call_fnames(d).folder,'juv_call_info*echo.mat'));
+        if ~isempty(call_info_fName)
+            call_info_fName = fullfile(call_info_fName.folder,call_info_fName.name);
+            if ~exist(call_info_fName,'file')
+                continue
+            end
+        else
+            continue
+        end
+        
+        assert(all([cut_call_data.uniqueID] == [call_info.callID]));
+        
+        echo_calls = arrayfun(@(x) strcmp(x.echoCall,'juvEcho'),call_info);
+        cut_call_data = cut_call_data(echo_calls);
+    end
+    
+    all_cut_call_data{d} = cut_call_data;
+    
+end
+
 end
 
 function callWF = loadCallWF_onTheFly(cData,call_k)
@@ -1139,8 +1135,8 @@ if isempty(F0)
     ap = NaN;
 end
 
-F0 = smooth(F0,2);
-ap = smooth(ap,2);
+F0 = smoothdata(F0,'movmean',2);
+ap = smoothdata(ap,'movmean',2);
 
 end
 function F0 = calculate_spCorr_F0(callWF,p)
