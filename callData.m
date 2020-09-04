@@ -204,7 +204,7 @@ classdef callData
         end
         function cData = load_call_data(cData,varargin)
             
-            if any(strcmp(cData.expType,{'juvenile','adult','adult_operant'})) % Maimon's ephys experiments
+            if any(strcmp(cData.expType,{'juvenile','adult','adult_operant','adult_social'})) % Maimon's ephys experiments
                 
                 eData = ephysData(cData.expType);
                 cData.loadWF = false;
@@ -275,11 +275,19 @@ classdef callData
                                 current_fname = cut_call_data(c).fName;
                                 if (ischar(current_fname) && exist(cut_call_data(c).fName,'file')) || (iscell(current_fname) && any(logical(cellfun(@exist,current_fname))))
                                     cData.fName{call_k} = current_fname;
-                                else
+                                elseif strcmp(cData.expType,'juvenile')
                                     cData.fName{call_k} = strrep(cut_call_data(c).fName,'Z:\users\Maimon\ephys\','E:\ephys\juvenile_recording\');
                                     if ~logical(exist(cData.fName{call_k} ,'file'))
                                         continue
                                     end
+                                else
+                                    if iscell(cut_call_data(c).fName)
+                                        driveStr = cut_call_data(c).fName{1}(1:3);
+                                    else
+                                        driveStr = cut_call_data(c).fName(1:3);
+                                    end
+                                    expStr = [cData.expType '_recording'];
+                                    cData.fName{call_k} = strrep(cut_call_data(c).fName,[driveStr 'users\maimon\' expStr filesep],eData.remoteDirs{1});
                                 end
                                 cData.callID(call_k) = cut_call_data(c).uniqueID;
                                 call_k = call_k + 1;
@@ -1113,7 +1121,14 @@ function all_cut_call_data = get_cut_call_data(cData)
 
 
 switch cData.expType
-    
+    case 'adult_social'
+        switch cData.exp_session_type
+            case 'communication'
+                cut_call_fnames = dir(fullfile(cData.baseDirs{1},'call_data','*cut_call_data.mat'));
+            case 'social'
+                cut_call_fnames = dir(fullfile(cData.baseDirs{1},'call_data','*cut_call_data_social.mat'));
+        end
+        
     case 'adult_operant'
         switch cData.exp_session_type
             case 'communication'
@@ -1181,7 +1196,7 @@ end
 
 function callWF = loadCallWF_onTheFly(cData,call_k)
 
-if any(strcmp(cData.expType,{'adult_operant','adult','juvenile'}))
+if any(strcmp(cData.expType,{'adult_operant','adult','juvenile','adult_social'}))
     if ischar(cData.fName{call_k})
         callWF = audioread(cData.fName{call_k},cData.file_call_pos(call_k,:));
     else
