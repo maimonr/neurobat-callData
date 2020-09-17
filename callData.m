@@ -287,7 +287,7 @@ classdef callData
                                         driveStr = cut_call_data(c).fName(1:3);
                                     end
                                     expStr = [cData.expType '_recording'];
-                                    cData.fName{call_k} = strrep(cut_call_data(c).fName,[driveStr 'users\maimon\' expStr filesep],eData.remoteDirs{1});
+                                    cData.fName{call_k} = strrep(cut_call_data(c).fName,[driveStr 'users\maimon\' expStr],eData.serverPath);
                                 end
                                 cData.callID(call_k) = cut_call_data(c).uniqueID;
                                 call_k = call_k + 1;
