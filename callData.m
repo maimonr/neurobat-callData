@@ -281,13 +281,9 @@ classdef callData
                                         continue
                                     end
                                 else
-                                    if iscell(cut_call_data(c).fName)
-                                        driveStr = cut_call_data(c).fName{1}(1:3);
-                                    else
-                                        driveStr = cut_call_data(c).fName(1:3);
-                                    end
                                     expStr = [cData.expType '_recording'];
-                                    cData.fName{call_k} = strrep(cut_call_data(c).fName,[driveStr 'users\maimon\' expStr],eData.serverPath);
+                                    leadingStr = regexp(cut_call_data(c).fName,['^(.*?)' expStr],'match');
+                                    cData.fName{call_k} = strrep(cut_call_data(c).fName,leadingStr{1},eData.serverPath);
                                 end
                                 cData.callID(call_k) = cut_call_data(c).uniqueID;
                                 call_k = call_k + 1;
