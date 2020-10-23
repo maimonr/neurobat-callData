@@ -806,57 +806,28 @@ classdef callData
                 interDayIdx = abs(diff([cData.expDay(1); cData.expDay]))>duration(1,0,0) | interCallInterval<0;
             end
         end
-        function inter_bat_ici = calculate_inter_bat_ICI(cData)
-            bat_k = 1;
-            inter_bat_ici = cell(1, length(cData.batNums));
-            for bNum = cData.batNums
-                callIdx = find(strcmp(cData.batNum,bNum{1}));
-                cPos = cData.callPos(callIdx,:);
-                ICI = [Inf; cPos(2:end,1) - cPos(1:end-1,2)];
-                ICI = ICI(ICI > 0 & ICI < 60*60*12);
-                iciIdx = ICI > 1;
-                used_call_IDs = cData.callID(callIdx(iciIdx));
-                try
-                    S = substruct('()',{'callID',used_call_IDs,'batNum',bNum},'.','expDay');
-                    callTimes = cData.subsref(S) + hours(12) + seconds(cPos(iciIdx,1));
-                    
-                catch
-                    S = substruct('()',{'callID',used_call_IDs},'.','callID');
-                    y = cData.subsref(S);
-                    uniqueY = unique(y);
-                    idx = find(histcounts(y,uniqueY)~=1);
-                    discardCalls = false(1,length(idx));
-                    rep_id_nums = nan(1,length(idx));
-                    for k = 1:length(idx)
-                        rep_id_nums(k) = unique(y(y == uniqueY(idx(k))));
-                        S = substruct('()',{'callID',rep_id_nums(k)},'.','batNum');
-                        rep_bat_num = cData.subsref(S);
-                        nRep = length(rep_bat_num);
-                        discardCalls(k) = nRep > 1 && length(unique(rep_bat_num)) ~= nRep;
-                    end
-                    
-                    used_call_IDs = setdiff(used_call_IDs,rep_id_nums(discardCalls));
-                    S = substruct('()',{'callID',used_call_IDs,'batNum',bNum},'.','callPos');
-                    cPos = cData.subsref(S);
-                    S = substruct('()',{'callID',used_call_IDs,'batNum',bNum},'.','expDay');
-                    callTimes = cData.subsref(S) + hours(12) + seconds(cPos(:,1));
-                    
-                end
+        function inter_bat_ici = get_inter_bat_ici(cData)
+            k = 1;
+            inter_bat_ici = nan(1,cData.nCalls);
+            expDays = unique(cData.expDay);
+            for current_exp_day = expDays'
+                dateIdx = cData.expDay == current_exp_day;
+                current_call_pos = cData.callPos(dateIdx,1);
+                current_bat_num = cData.batNum(dateIdx);
                 
-                callIdx = find(~strcmp(cData.batNum,bNum{1}));
-                callTimes_nonbat = cData.expDay(callIdx) + hours(12) + seconds(cData.callPos(callIdx,1));
-                
-                inter_bat_ici{bat_k} = zeros(1,length(callTimes));
-                for k = 1:length(callTimes)
-                    allICI = callTimes_nonbat - callTimes(k);
-                    allICI = allICI(allICI > 0 & allICI < seconds(60*60*12));
-                    if ~isempty(allICI)
-                        inter_bat_ici{bat_k}(k) = seconds(min(allICI));
+                for call_k = 1:length(current_call_pos)
+                    if ~iscell(current_bat_num{call_k})
+                        next_bat_idx = find(~strcmp(current_bat_num,current_bat_num{call_k}),1,'first');
+                        if ~isempty(next_bat_idx)
+                            inter_bat_ici(k) = current_call_pos(call_k) - current_call_pos(next_bat_idx);
+                        else
+                            inter_bat_ici(k) = Inf;
+                        end
                     else
-                        inter_bat_ici{bat_k}(k) = NaN;
+                        inter_bat_ici(k) = 0;
                     end
+                    k = k + 1;
                 end
-                bat_k = bat_k + 1;
             end
         end
         function bout_call_nums = get_call_bout_nums(cData,callNum,boutSeparation)
@@ -869,7 +840,7 @@ classdef callData
             cPos = cData.callPos(session_idx,:);
             session_inter_call_interval = [Inf; cPos(2:end,1) - cPos(1:end-1,2)];
             session_callID = cData.callID(session_idx);
-            session_call_k = call_k - session_idx(1);
+            session_call_k = call_k - session_idx(1) + 1;
             idx = [session_call_k - find(session_inter_call_interval(session_call_k:-1:1) > boutSeparation,1,'first')+1:session_call_k ,...
                 session_call_k+1:session_call_k+find(session_inter_call_interval(session_call_k+1:end) > boutSeparation,1,'first')-1];
             

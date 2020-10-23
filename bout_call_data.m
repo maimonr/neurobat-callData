@@ -340,9 +340,11 @@ classdef bout_call_data < ephysData
         end
         
         function [success,boutCallWF,sample_offset] = get_bout_WF_manual(bc,cData,call_fNames,file_callPos,offset)
-            sample_call_offset = bc.fs*offset*[-1 1];
+            sample_call_offset = bc.fs*offset;
             sample_call_offset = reshape(sample_call_offset,size(file_callPos));
-            [success,boutCallWF,sample_offset] = get_bout_WF(bc,call_fNames,file_callPos + sample_call_offset);
+            file_callPos_offset = file_callPos + sample_call_offset;
+            
+            [success,boutCallWF,sample_offset] = get_bout_WF(bc,call_fNames,file_callPos_offset);
             
             if success && ~isempty(cData.compensation)
                 [N,D] = rat(cData.compensation.fs/cData.fs);
@@ -564,6 +566,39 @@ if any(cellfun(@iscell,call_fNames))
 end
 
 fNames_in_bout = unique(call_fNames);
+
+file_nums = cellfun(@(fname) strsplit(fname,filesep),fNames_in_bout,'un',0);
+file_nums = cellfun(@(fname) strsplit(fname{end}(1:strfind(fname{end},'.')-1),'_'),file_nums,'un',0);
+file_nums = cellfun(@(fname) str2double(fname{end}),file_nums);
+[~,idx] = sort(file_nums,'ascend');
+[audio_dir,~,ext] = fileparts(fNames_in_bout{idx(1)});
+
+all_fnames = dir(fullfile(audio_dir,['*' ext]));
+all_fnums = arrayfun(@(fname) strsplit(fname.name,'_'),all_fnames,'un',0);
+all_fnums = cellfun(@(fname) strsplit(fname{end}(1:strfind(fname{end},'.')-1),'_'),all_fnums,'un',0);
+all_fnums = cellfun(@(fname) str2double(fname{end}),all_fnums);
+
+if file_callPos(1) < 1
+    first_bout_fnum = file_nums(idx(1));
+    
+    preceding_file_idx = all_fnums == first_bout_fnum-1;
+    preceding_fname = fullfile(audio_dir,all_fnames(preceding_file_idx).name);
+    info = audioinfo(preceding_fname);
+    fNames_in_bout = [preceding_fname; fNames_in_bout];
+    file_callPos(1) = file_callPos(1) + info.TotalSamples;
+end
+
+last_bout_fname = fNames_in_bout{idx(end)};
+info = audioinfo(last_bout_fname);
+if file_callPos(2) > info.TotalSamples
+    last_bout_fnum = file_nums(idx(end));
+    
+    next_file_idx = all_fnums == last_bout_fnum+1;
+    next_fname = fullfile(audio_dir,all_fnames(next_file_idx).name);
+    fNames_in_bout = [fNames_in_bout; next_fname];
+    file_callPos(2) = file_callPos(2) - info.TotalSamples;
+end
+
 n_wav_files = length(fNames_in_bout);
 file_callPos_by_file = zeros(n_wav_files,2);
 
