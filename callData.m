@@ -801,14 +801,14 @@ classdef callData
         end
         function [interCallInterval, interDayIdx] = getICI(cData)
             cPos = cData.callPos;
-            interCallInterval = [0; cPos(2:end,1) - cPos(1:end-1,2)]; % ICI(k) = time between call(k) and previous call
+            interCallInterval = [Inf; cPos(2:end,1) - cPos(1:end-1,2)]; % ICI(k) = time between call(k) and previous call
             if nargout > 1
                 interDayIdx = abs(diff([cData.expDay(1); cData.expDay]))>duration(1,0,0) | interCallInterval<0;
             end
         end
-        function inter_bat_ici = get_inter_bat_ici(cData)
+        function [inter_bat_ici, intra_bat_ici] = get_inter_bat_ici(cData)
             k = 1;
-            inter_bat_ici = nan(1,cData.nCalls);
+            [inter_bat_ici, intra_bat_ici] = deal(nan(1,cData.nCalls));
             expDays = unique(cData.expDay);
             for current_exp_day = expDays'
                 dateIdx = cData.expDay == current_exp_day;
@@ -817,11 +817,18 @@ classdef callData
                 
                 for call_k = 1:length(current_call_pos)
                     if ~iscell(current_bat_num{call_k})
-                        next_bat_idx = find(~strcmp(current_bat_num,current_bat_num{call_k}),1,'first');
+                        next_bat_idx = call_k + find(~strcmp(current_bat_num(call_k+1:end),current_bat_num{call_k}),1,'first');
                         if ~isempty(next_bat_idx)
-                            inter_bat_ici(k) = current_call_pos(call_k) - current_call_pos(next_bat_idx);
+                            inter_bat_ici(k) = current_call_pos(next_bat_idx) - current_call_pos(call_k);
                         else
                             inter_bat_ici(k) = Inf;
+                        end
+                        
+                        same_bat_idx = call_k + find(strcmp(current_bat_num(call_k+1:end),current_bat_num{call_k}),1,'first');
+                        if ~isempty(same_bat_idx)
+                            intra_bat_ici(k) = current_call_pos(same_bat_idx) - current_call_pos(call_k);
+                        else
+                            intra_bat_ici(k) = Inf;
                         end
                     else
                         inter_bat_ici(k) = 0;
