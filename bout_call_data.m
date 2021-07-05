@@ -22,6 +22,7 @@ classdef bout_call_data < ephysData
         rSpec_type = 'mt'
         freq_res = 5
         frequencyLims = [1 50]
+        callType = 'call'
         
         rSpec
         nBouts
@@ -56,16 +57,13 @@ classdef bout_call_data < ephysData
         
         function bc = bout_call_data(cData,vdCall)
             
-            if nargin == 0
-                return
-            end
+            bc@ephysData(cData.expType);
+            
             debugFlag = false;
             bc.batNums = cData.batNums;
             bc.fs = cData.fs;
-            bc.expType = vdCall.expType;
-            bc.callType = vdCall.callType;
             
-            if strcmp(bc.expType{1},'adult_operant') && strcmp(bc.callType{1},'operant')
+            if strcmp(bc.expType,'adult_operant') && strcmp(bc.callType,'operant')
                 [b,a] = butter(4,200/(bc.fs/2),'high');
                 bc.raw_data_filter = struct('b',b,'a',a);
             end
@@ -463,7 +461,8 @@ try
     
     switch bc.rSpec_type
         case 'mt'
-            padFeature = padarray(feature,[0 ceil(((bc.boutSize*bc.feature_fs)-length(feature))/2)],0);
+            padSize = ceil(((bc.boutSize*bc.feature_fs)-length(feature))/2);
+            padFeature = [zeros(1,padSize) feature zeros(1,padSize)];
             
             if rem(length(feature),2) ~= 0
                 padFeature = padFeature(1:end-1);
@@ -658,7 +657,8 @@ for k = 1:length(bc.rhythm_lag_segment_bounds)-1
     lagIdx(k,:) = freqs>bc.rhythm_lag_segment_bounds(k) & freqs<bc.rhythm_lag_segment_bounds(k+1);
 end
 %%
-paddedEnv = filtfilt(filter_coefs.lp(1,:),filter_coefs.lp(2,:),padarray(feature',slinding_win_size));
+padFeature = [zeros(1,slinding_win_size) feature zeros(1,slinding_win_size)];
+paddedEnv = filtfilt(filter_coefs.lp(1,:),filter_coefs.lp(2,:),padFeature');
 % paddedEnv = zscore(paddedEnv);
 paddedEnv = diff(paddedEnv);
 % thresh = bc.feature_threshold*std(diff(zscore(feature)));
